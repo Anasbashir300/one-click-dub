@@ -1,0 +1,82 @@
+{
+  "manifest_version": 3,
+  "name": "One Click Dub - Fast Local Server",
+  "description": "RunPod RTX backend for public video dubbing: Fast Edge TTS, Quality OmniVoice Auto Clone, Pro preview.",
+  "version": "1.9.0",
+  "action": {
+    "default_title": "One Click Dub",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "cookies"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "https://translate.googleapis.com/*",
+    "https://dev.microsofttranslator.com/*",
+    "https://*.tts.speech.microsoft.com/*",
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*",
+    "https://one-click-dub-fast-server.onrender.com/*",
+    "https://*.trycloudflare.com/*",
+    "https://*.loca.lt/*",
+    "https://*.proxy.runpod.net/*",
+    "https://*.runpod.net/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "ocd-speed-reset.js",
+        "content.js",
+        "sidebar.js",
+        "custom-dub-bridge.js"
+      ],
+      "css": [
+        "content.css",
+        "sidebar.css"
+      ],
+      "run_at": "document_idle",
+      "exclude_matches": [
+        "*://*.google.com/recaptcha/*",
+        "*://*.gstatic.com/*",
+        "*://*.googleusercontent.com/*",
+        "*://chrome.google.com/*",
+        "*://chromewebstore.google.com/*"
+      ]
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "version_name": "1.9.0-runpod-rtx3090",
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content-scripts/sidebar.css",
+        "ocd-page-capture.js",
+        "sidebar.css",
+        "custom-dub-bridge.js",
+        "voice-samples/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}

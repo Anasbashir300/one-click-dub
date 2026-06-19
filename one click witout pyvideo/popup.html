@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>One Click Dub</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="top">
+      <img src="icons/icon128.png" alt="" class="logo" />
+      <div>
+        <h1>One Click Dub</h1>
+        <p>AI dubbing controls</p>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="field">
+        <label>Target language</label>
+        <div id="targetLanguageDropdown" class="smart-select search-select"></div>
+      </div>
+
+      <div class="field">
+        <label>Dubbing language</label>
+        <div id="dubbingLanguageDropdown" class="smart-select search-select"></div>
+      </div>
+
+      <div class="field">
+        <label>Model</label>
+        <div id="modelDropdown" class="smart-select"></div>
+      </div>
+
+      <div class="field">
+        <label>Voice</label>
+        <div id="voiceDropdown" class="smart-select voice-select"></div>
+      </div>
+
+      <div class="field">
+        <label>Original video volume</label>
+        <div class="volume-modes" id="originalVolumeMode">
+          <button type="button" data-value="muted">Muted</button>
+          <button type="button" data-value="low">Low</button>
+          <button type="button" data-value="normal">Normal</button>
+        </div>
+      </div>
+
+      <div class="toggle-row">
+        <span>Captions</span>
+        <button id="captionsToggle" class="switch" type="button" aria-label="Toggle captions"></button>
+      </div>
+
+      <section id="captionSettings" class="caption-settings">
+        <div class="field">
+          <label>Caption style</label>
+          <div id="captionStyleDropdown" class="smart-select"></div>
+        </div>
+
+        <div class="caption-grid">
+          <div class="field">
+            <label>Position</label>
+            <div id="captionPositionDropdown" class="smart-select"></div>
+          </div>
+          <div class="field">
+            <label>Size</label>
+            <div id="captionSizeDropdown" class="smart-select"></div>
+          </div>
+        </div>
+
+        <div class="caption-grid">
+          <div class="field">
+            <label>Active color</label>
+            <div id="captionColorDropdown" class="smart-select"></div>
+          </div>
+          <div class="field">
+            <label>Animation</label>
+            <div id="captionAnimationDropdown" class="smart-select"></div>
+          </div>
+        </div>
+
+        <div class="caption-preview-wrap">
+          <span class="preview-label">Preview</span>
+          <div id="captionPreview" class="caption-preview">This is a <span>sample</span> caption</div>
+        </div>
+      </section>
+
+      <div class="toggle-row">
+        <span>Quick browser buttons</span>
+        <button id="quickButtonsToggle" class="switch" type="button" aria-label="Toggle quick browser buttons"></button>
+      </div>
+
+      <div class="actions">
+        <button id="toggleDub" class="primary">Start dubbing</button>
+      </div>
+      <div id="toast" class="popup-toast" hidden></div>
+    </section>
+
+    <footer>Settings are saved automatically</footer>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

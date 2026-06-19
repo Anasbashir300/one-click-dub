@@ -1,0 +1,252 @@
+\
+#ocd-root,#ocd-root *{box-sizing:border-box;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Arial}
+#ocd-root{all:initial;position:fixed;z-index:2147483600;inset:0;pointer-events:none;color:#f8f8fc}
+#ocd-root button{font-family:inherit;cursor:pointer}
+#ocd-root .hidden{display:none!important}
+
+#ocd-root .quick-buttons{
+  position:fixed;right:20px;top:50%;transform:translateY(-50%);
+  display:grid;gap:10px;pointer-events:auto
+}
+#ocd-root .quick-btn{
+  width:48px;height:48px;border-radius:16px;border:1px solid rgba(255,255,255,.14);
+  background:linear-gradient(180deg,rgba(18,19,30,.96),rgba(9,10,16,.96));
+  color:#fff;display:grid;place-items:center;font-size:19px;
+  box-shadow:0 14px 35px rgba(0,0,0,.42);transition:.2s
+}
+#ocd-root .quick-btn.dub{border-color:rgba(168,85,247,.55)}
+#ocd-root .quick-btn.summary{border-color:rgba(246,180,75,.55);color:#ffdca0}
+#ocd-root .quick-btn.active,#ocd-root .quick-btn.success{
+  background:linear-gradient(90deg,#059669,#34d399);color:#fff;border-color:rgba(52,211,153,.8)
+}
+
+#ocd-root .loader{
+  position:fixed;left:50%;top:45%;transform:translate(-50%,-50%);
+  width:230px;height:124px;border-radius:20px;display:grid;place-items:center;
+  color:white;background:rgba(18,19,30,.93);border:1px solid rgba(255,255,255,.12);
+  box-shadow:0 24px 70px rgba(0,0,0,.55);backdrop-filter:blur(18px);pointer-events:auto
+}
+#ocd-root .ring{
+  width:52px;height:52px;border-radius:50%;border:6px solid rgba(255,255,255,.14);
+  border-top-color:#a855f7;animation:ocdspin 1s linear infinite;margin:auto
+}
+@keyframes ocdspin{to{transform:rotate(360deg)}}
+#ocd-root .loader p{margin:10px 0 0;text-align:center;font-size:14px;font-weight:800}
+
+/* Caption is positioned by JS inside the actual video bounding box */
+#ocd-root .caption{
+  position:fixed;
+  left:0;
+  top:0;
+  max-width:760px;
+  padding:10px 16px;
+  border-radius:12px;
+  color:#fff;
+  background:rgba(0,0,0,.58);
+  font-size:24px;
+  line-height:1.28;
+  text-align:center;
+  text-shadow:0 2px 5px rgba(0,0,0,.75);
+  pointer-events:none;
+  will-change:transform,opacity,filter;
+  word-break:normal;
+  overflow-wrap:break-word;
+  direction:auto;
+}
+#ocd-root .caption .active{color:#facc15}
+#ocd-root .caption.color-purple .active{color:#c084fc}
+#ocd-root .caption.color-cyan .active{color:#22d3ee}
+#ocd-root .caption.color-green .active{color:#34d399}
+#ocd-root .caption.color-red .active{color:#fb7185}
+
+#ocd-root .caption.size-small{font-size:16px;padding:7px 11px}
+#ocd-root .caption.size-medium{font-size:20px;padding:8px 13px}
+#ocd-root .caption.size-large{font-size:25px;padding:10px 16px}
+#ocd-root .caption.size-xl{font-size:32px;padding:12px 20px}
+
+#ocd-root .caption.style-tiktok{
+  font-weight:1000;
+  text-transform:uppercase;
+  letter-spacing:.01em;
+  background:transparent;
+  text-shadow:
+    3px 3px 0 #000,
+    -2px -2px 0 #000,
+    2px -2px 0 #000,
+    -2px 2px 0 #000,
+    0 0 18px rgba(0,0,0,.72)
+}
+#ocd-root .caption.style-capcut{
+  font-weight:850;
+  background:rgba(0,0,0,.34);
+  backdrop-filter:blur(4px);
+  text-shadow:0 4px 14px rgba(0,0,0,.85)
+}
+#ocd-root .caption.style-karaoke{
+  font-weight:950;
+  background:transparent;
+  text-shadow:0 2px 0 #000,0 0 12px rgba(0,0,0,.6)
+}
+#ocd-root .caption.style-karaoke .past{color:rgba(255,255,255,.62)}
+#ocd-root .caption.style-box{
+  font-weight:750;
+  background:rgba(0,0,0,.72);
+  border-radius:14px;
+  text-shadow:none;
+  padding:12px 18px
+}
+#ocd-root .caption.style-neon{
+  font-weight:950;
+  background:transparent;
+  text-shadow:0 0 8px #a855f7,0 0 18px #a855f7,0 2px 4px #000
+}
+#ocd-root .caption.style-minimal{
+  font-weight:650;
+  background:transparent;
+  text-shadow:0 3px 10px rgba(0,0,0,.8)
+}
+
+/* Motion classes. JS removes/adds them every caption tick to restart animation */
+#ocd-root .caption.motion-fade{animation:ocdFade .55s ease both}
+#ocd-root .caption.motion-pop{animation:ocdPop .48s cubic-bezier(.16,1.28,.36,1) both}
+#ocd-root .caption.motion-bounce{animation:ocdBounce .65s cubic-bezier(.28,1.58,.48,.96) both}
+#ocd-root .caption.motion-karaoke .active{animation:ocdWordPulse .7s ease both}
+
+@keyframes ocdFade{
+  0%{opacity:0;filter:blur(4px)}
+  100%{opacity:1;filter:blur(0)}
+}
+@keyframes ocdPop{
+  0%{opacity:.2;transform:var(--ocd-transform) scale(.78)}
+  65%{opacity:1;transform:var(--ocd-transform) scale(1.08)}
+  100%{opacity:1;transform:var(--ocd-transform) scale(1)}
+}
+@keyframes ocdBounce{
+  0%{opacity:.35;transform:var(--ocd-transform) translateY(16px)}
+  55%{opacity:1;transform:var(--ocd-transform) translateY(-6px)}
+  100%{opacity:1;transform:var(--ocd-transform) translateY(0)}
+}
+@keyframes ocdWordPulse{
+  0%{filter:brightness(1);transform:scale(.96)}
+  50%{filter:brightness(1.45);transform:scale(1.08)}
+  100%{filter:brightness(1);transform:scale(1)}
+}
+
+#ocd-root .summary-workshop{
+  position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:min(680px,86vw);height:430px;border-radius:28px;overflow:hidden;pointer-events:auto;
+  border:1px solid rgba(255,255,255,.14);background:#070812;
+  box-shadow:0 30px 90px rgba(0,0,0,.62)
+}
+#ocd-root .summary-workshop::before{
+  content:"";position:absolute;inset:-40%;
+  background:radial-gradient(circle at 20% 25%,rgba(255,0,128,.75),transparent 18%),
+    radial-gradient(circle at 70% 30%,rgba(0,204,255,.7),transparent 20%),
+    radial-gradient(circle at 45% 75%,rgba(50,255,120,.65),transparent 22%),
+    radial-gradient(circle at 80% 80%,rgba(255,210,0,.65),transparent 18%);
+  filter:blur(28px);animation:rgbMagic 5s linear infinite
+}
+#ocd-root .summary-workshop::after{content:"";position:absolute;inset:0;background:rgba(7,8,18,.45);backdrop-filter:blur(16px)}
+@keyframes rgbMagic{0%{transform:rotate(0deg) scale(1)}50%{transform:rotate(180deg) scale(1.08)}100%{transform:rotate(360deg) scale(1)}}
+#ocd-root .workshop-inner{position:relative;z-index:2;height:100%;display:grid;place-items:center;text-align:center;padding:28px}
+#ocd-root .workshop-inner h3{font-size:24px;margin:0 0 10px;color:#fff}
+#ocd-root .workshop-inner p{font-size:13px;color:#d7d9e7;margin:0;line-height:1.6}
+#ocd-root .spark{width:86px;height:86px;border-radius:26px;margin:0 auto 18px;background:linear-gradient(135deg,rgba(255,255,255,.2),rgba(255,255,255,.04));border:1px solid rgba(255,255,255,.18);display:grid;place-items:center;font-size:34px}
+#ocd-root .workshop-close{position:absolute;top:14px;right:14px;z-index:3;width:34px;height:34px;border-radius:12px;border:1px solid rgba(255,255,255,.16);background:rgba(0,0,0,.25);color:#fff}
+
+#ocd-root .summary-viewer{
+  position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:min(720px,88vw);height:500px;border-radius:28px;pointer-events:auto;
+  background:linear-gradient(180deg,rgba(18,19,30,.98),rgba(8,9,15,.98));
+  border:1px solid rgba(255,255,255,.14);box-shadow:0 30px 90px rgba(0,0,0,.62);
+  padding:16px;display:grid;grid-template-rows:auto 1fr auto;gap:12px
+}
+#ocd-root .summary-head{display:flex;align-items:center;justify-content:space-between}
+#ocd-root .summary-head strong{font-size:16px;color:#fff}
+#ocd-root .summary-close{width:32px;height:32px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:#fff}
+#ocd-root .summary-slide{border-radius:22px;overflow:hidden;position:relative;background:linear-gradient(135deg,#263b58,#f3ae55);display:flex;align-items:end;padding:24px}
+#ocd-root .summary-slide::before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 50% 20%,rgba(255,255,255,.38),transparent 18%),linear-gradient(transparent 45%,rgba(0,0,0,.55))}
+#ocd-root .slide-content{position:relative;z-index:1;color:#fff;max-width:78%}
+#ocd-root .slide-content h3{font-size:28px;margin:0 0 10px}
+#ocd-root .slide-content p{font-size:14px;line-height:1.65;margin:0;color:#f5efe8}
+#ocd-root .summary-controls{display:grid;grid-template-columns:48px 1fr 48px;gap:10px;align-items:center}
+.nav-btn,.download-btn,.share-btn{height:42px;border-radius:14px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:#fff;font-weight:800}
+.summary-actions{display:flex;gap:8px;justify-content:center}
+.download-btn,.share-btn{padding:0 14px}
+
+#ocd-root .toast{
+  position:fixed;left:20px;bottom:22px;pointer-events:none;color:white;
+  padding:10px 13px;border-radius:13px;font-size:12px;
+  background:rgba(18,19,30,.94);border:1px solid rgba(168,85,247,.34);
+  box-shadow:0 12px 30px rgba(0,0,0,.35)
+}
+
+
+/* Active word motion fix: the highlighted word itself now moves like TikTok/CapCut captions */
+#ocd-root .caption .active{
+  display:inline-block;
+  transform-origin:center bottom;
+  will-change:transform,filter,opacity;
+}
+
+#ocd-root .caption.motion-pop .active{
+  animation:ocdActiveWordPop .55s cubic-bezier(.16,1.28,.36,1) both;
+}
+
+#ocd-root .caption.motion-bounce .active{
+  animation:ocdActiveWordBounce .72s cubic-bezier(.28,1.58,.48,.96) both;
+}
+
+#ocd-root .caption.motion-fade .active{
+  animation:ocdActiveWordFade .55s ease both;
+}
+
+#ocd-root .caption.motion-karaoke .active,
+#ocd-root .caption.style-karaoke .active{
+  animation:ocdActiveWordKaraoke .9s ease-in-out both;
+}
+
+#ocd-root .caption.style-tiktok .active{
+  animation:ocdActiveWordTikTok .65s cubic-bezier(.16,1.28,.36,1) both;
+}
+
+#ocd-root .caption.style-neon .active{
+  animation:ocdActiveWordNeon 1s ease-in-out both;
+}
+
+@keyframes ocdActiveWordPop{
+  0%{transform:translateY(8px) scale(.72);opacity:.3;filter:brightness(.9)}
+  58%{transform:translateY(-3px) scale(1.18);opacity:1;filter:brightness(1.45)}
+  100%{transform:translateY(0) scale(1);opacity:1;filter:brightness(1)}
+}
+
+@keyframes ocdActiveWordBounce{
+  0%{transform:translateY(14px) scale(.9);opacity:.4}
+  45%{transform:translateY(-10px) scale(1.08);opacity:1}
+  72%{transform:translateY(4px) scale(.98)}
+  100%{transform:translateY(0) scale(1)}
+}
+
+@keyframes ocdActiveWordFade{
+  0%{opacity:.2;filter:blur(3px)}
+  100%{opacity:1;filter:blur(0)}
+}
+
+@keyframes ocdActiveWordKaraoke{
+  0%{transform:scale(.95);filter:brightness(1)}
+  35%{transform:scale(1.12);filter:brightness(1.65)}
+  70%{transform:scale(1.04);filter:brightness(1.25)}
+  100%{transform:scale(1);filter:brightness(1)}
+}
+
+@keyframes ocdActiveWordTikTok{
+  0%{transform:translateY(10px) rotate(-2deg) scale(.75);opacity:.35}
+  50%{transform:translateY(-4px) rotate(1deg) scale(1.2);opacity:1}
+  100%{transform:translateY(0) rotate(0) scale(1)}
+}
+
+@keyframes ocdActiveWordNeon{
+  0%{transform:scale(.94);filter:drop-shadow(0 0 0 rgba(168,85,247,0))}
+  50%{transform:scale(1.12);filter:drop-shadow(0 0 12px rgba(168,85,247,.95))}
+  100%{transform:scale(1);filter:drop-shadow(0 0 4px rgba(168,85,247,.55))}
+}

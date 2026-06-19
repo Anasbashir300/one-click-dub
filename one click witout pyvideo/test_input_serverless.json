@@ -1,0 +1,14 @@
+{
+  "input": {
+    "url": "https://www.youtube.com/watch?v=ohS0Oxa_4eo",
+    "pageUrl": "https://www.youtube.com/watch?v=ohS0Oxa_4eo",
+    "referer": "https://www.youtube.com/watch?v=ohS0Oxa_4eo",
+    "sourceLanguage": "auto",
+    "targetLanguage": "ar",
+    "voiceName": "auto-clone-video",
+    "modelName": "quality",
+    "ttsType": 2,
+    "translationEngine": "nllb200",
+    "cuda": true
+  }
+}
