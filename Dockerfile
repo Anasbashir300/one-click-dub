@@ -29,4 +29,4 @@ RUN python -m pip install --no-cache-dir --ignore-installed -U pip setuptools pa
 COPY . /app
 
 # Serverless worker entry point.
-CMD ["python", "-u", "serverless_handler.py"]
+CMD ["python", "handler.py"]
