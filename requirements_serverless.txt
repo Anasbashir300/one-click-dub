@@ -19,3 +19,5 @@ huggingface_hub
 sacremoses
 protobuf
 catt-tashkeel
+safetensors
+omnivoice

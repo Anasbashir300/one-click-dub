@@ -24,9 +24,10 @@ ENV PATH="/root/.deno/bin:${PATH}"
 
 COPY requirements_serverless.txt /app/requirements_serverless.txt
 RUN python -m pip install --no-cache-dir --ignore-installed -U pip setuptools packaging wheel \
-    && python -m pip install --no-cache-dir -r /app/requirements_serverless.txt
+    && python -m pip install --no-cache-dir -r /app/requirements_serverless.txt \
+    && (python -c "import omnivoice; print('omnivoice ok')" || python -m pip install --no-cache-dir git+https://github.com/k2-fsa/OmniVoice.git)
 
 COPY . /app
 
 # Serverless worker entry point.
-CMD ["python", "-u", "serverless_handler.py"]
+CMD ["python", "-u", "handler.py"]
