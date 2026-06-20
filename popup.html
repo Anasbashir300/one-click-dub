@@ -1,103 +1,110 @@
 <!doctype html>
-<html lang="en" dir="ltr">
+<html lang="ar" dir="rtl">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>One Click Dub</title>
-  <link rel="stylesheet" href="popup.css" />
+  <link rel="stylesheet" href="popup.css">
+  <style>
+    .ocd-field { display: grid; gap: 7px; margin-bottom: 12px; }
+    .ocd-field span { font-size: 13px; font-weight: 800; color: #ddd8e8; }
+    .ocd-native-select {
+      width: 100%; min-height: 44px; border-radius: 10px; padding: 0 12px;
+      color: #f6f3fb; background: rgba(11, 13, 20, .78);
+      border: 1px solid rgba(255,255,255,.16); outline: none; font-weight: 750;
+    }
+    .ocd-native-select option { color: #111827; background: #fff; }
+    .ocd-voice-actions { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: -2px; }
+    .ocd-preview-btn {
+      width: 100%; border: 0; border-radius: 10px; padding: 10px 12px;
+      cursor: pointer; font-weight: 850; color: #fff;
+      background: linear-gradient(90deg, #343a54, #6029a8);
+    }
+    .ocd-help { margin: 6px 0 0; font-size: 12px; color: #aaa2b8; line-height: 1.55; }
+  </style>
 </head>
 <body>
-  <main class="app">
-    <header class="top">
-      <img src="icons/icon128.png" alt="" class="logo" />
-      <div>
-        <h1>One Click Dub</h1>
-        <p>AI dubbing controls</p>
-      </div>
-    </header>
+  <section class="extension-panel" aria-label="لوحة إضافة One Click Dub">
+    <button class="panel-close" aria-label="إغلاق">×</button>
+    <div class="brand-row" dir="ltr">
+      <span class="big-logo"></span>
+      <h1>ONE CLICK <span>DUB</span></h1>
+    </div>
 
-    <section class="card">
-      <div class="field">
-        <label>Target language</label>
-        <div id="targetLanguageDropdown" class="smart-select search-select"></div>
+    <form class="settings">
+      <label class="ocd-field">
+        <span>لغة المصدر</span>
+        <select id="sourceLanguage" class="ocd-native-select" name="sourceLanguage">
+          <option value="auto">اكتشاف تلقائي</option>
+          <option value="en">English</option>
+          <option value="ar">العربية</option>
+          <option value="fr">Français</option>
+          <option value="es">Español</option>
+          <option value="de">Deutsch</option>
+          <option value="it">Italiano</option>
+          <option value="pt">Português</option>
+          <option value="tr">Türkçe</option>
+          <option value="hi">हिन्दी</option>
+          <option value="ja">日本語</option>
+          <option value="ko">한국어</option>
+          <option value="zh">中文</option>
+        </select>
+      </label>
+
+      <label class="ocd-field">
+        <span>لغة الدبلجة</span>
+        <select id="targetLanguage" class="ocd-native-select" name="targetLanguage">
+          <option value="ar">العربية</option>
+          <option value="en">English</option>
+          <option value="fr">Français</option>
+          <option value="es">Español</option>
+          <option value="de">Deutsch</option>
+          <option value="it">Italiano</option>
+          <option value="pt">Português</option>
+          <option value="tr">Türkçe</option>
+          <option value="hi">हिन्दी</option>
+          <option value="ja">日本語</option>
+          <option value="ko">한국어</option>
+          <option value="zh">中文</option>
+        </select>
+      </label>
+
+      <label class="ocd-field">
+        <span>النموذج</span>
+        <select id="modelName" class="ocd-native-select" name="modelName" dir="ltr">
+          <option value="fast">Fast — Edge TTS</option>
+          <option value="quality">Quality — OmniVoice</option>
+          <option value="pro">Pro — Fish Speech</option>
+        </select>
+      </label>
+
+      <label class="ocd-field">
+        <span>الصوت</span>
+        <select id="voiceName" class="ocd-native-select" name="voiceName"></select>
+      </label>
+
+      <div class="ocd-voice-actions">
+        <button type="button" id="ocdVoicePreviewButton" class="ocd-preview-btn">▶ عينة الصوت</button>
+        <p id="ocdVoiceHelp" class="ocd-help">Fast يعرض صوت ذكر وصوت أنثى لكل لغة. Quality وPro: استنساخ صوت الفيديو أو 4 أصوات جاهزة.</p>
       </div>
 
-      <div class="field">
-        <label>Dubbing language</label>
-        <div id="dubbingLanguageDropdown" class="smart-select search-select"></div>
-      </div>
-
-      <div class="field">
-        <label>Model</label>
-        <div id="modelDropdown" class="smart-select"></div>
-      </div>
-
-      <div class="field">
-        <label>Voice</label>
-        <div id="voiceDropdown" class="smart-select voice-select"></div>
-      </div>
-
-      <div class="field">
-        <label>Original video volume</label>
-        <div class="volume-modes" id="originalVolumeMode">
-          <button type="button" data-value="muted">Muted</button>
-          <button type="button" data-value="low">Low</button>
-          <button type="button" data-value="normal">Normal</button>
-        </div>
+      <div class="volume-row">
+        <span>رفع الصوت</span>
+        <div class="slider-line" dir="ltr"><i>☊</i><b></b></div>
+        <output>80%</output>
       </div>
 
       <div class="toggle-row">
-        <span>Captions</span>
-        <button id="captionsToggle" class="switch" type="button" aria-label="Toggle captions"></button>
+        <span>عرض الكابشن</span>
+        <button type="button" class="toggle on" aria-label="عرض الكابشن"><span></span></button>
       </div>
 
-      <section id="captionSettings" class="caption-settings">
-        <div class="field">
-          <label>Caption style</label>
-          <div id="captionStyleDropdown" class="smart-select"></div>
-        </div>
+      <button type="button" class="primary-cta">حفظ الإعدادات <i>›</i></button>
+      <button type="button" class="ai-cta"><span>[Ai]</span> تلخيص الفيديو بالذكاء الاصطناعي <i>›</i></button>
+    </form>
 
-        <div class="caption-grid">
-          <div class="field">
-            <label>Position</label>
-            <div id="captionPositionDropdown" class="smart-select"></div>
-          </div>
-          <div class="field">
-            <label>Size</label>
-            <div id="captionSizeDropdown" class="smart-select"></div>
-          </div>
-        </div>
-
-        <div class="caption-grid">
-          <div class="field">
-            <label>Active color</label>
-            <div id="captionColorDropdown" class="smart-select"></div>
-          </div>
-          <div class="field">
-            <label>Animation</label>
-            <div id="captionAnimationDropdown" class="smart-select"></div>
-          </div>
-        </div>
-
-        <div class="caption-preview-wrap">
-          <span class="preview-label">Preview</span>
-          <div id="captionPreview" class="caption-preview">This is a <span>sample</span> caption</div>
-        </div>
-      </section>
-
-      <div class="toggle-row">
-        <span>Quick browser buttons</span>
-        <button id="quickButtonsToggle" class="switch" type="button" aria-label="Toggle quick browser buttons"></button>
-      </div>
-
-      <div class="actions">
-        <button id="toggleDub" class="primary">Start dubbing</button>
-      </div>
-      <div id="toast" class="popup-toast" hidden></div>
-    </section>
-
-    <footer>Settings are saved automatically</footer>
-  </main>
+    <p class="trust-line">آمن • خاص • يعمل بالكامل في متصفحك <span>♢</span></p>
+  </section>
   <script src="popup.js"></script>
 </body>
 </html>

@@ -19,26 +19,20 @@ const DEFAULT_RUNPOD_MODEL = "quality";
 const RUNPOD_SERVERLESS_ENDPOINTS = {
   fast: {
     label: "Fast",
-    endpointId: "jtk3716mehm2h7",
-    apiKey: https://api.runpod.ai/v2/jtk3716mehm2h7/run,
+    endpointId: "PUT_FAST_ENDPOINT_ID_HERE",
+    apiKey: RUNPOD_API_KEY,
     policy: { executionTimeout: 600000, ttl: 3600000 }
   },
   quality: {
     label: "Quality / OmniVoice",
-    endpointId: o4hpowh4ekgx0d,
-    apiKey: https://api.runpod.ai/v2/o4hpowh4ekgx0d/run,
-    policy: { executionTimeout: 900000, ttl: 3600000 }
-  },
-  thinker: {
-    label: "Thinker / OmniVoice",
     endpointId: RUNPOD_SERVERLESS_ENDPOINT_ID,
     apiKey: RUNPOD_API_KEY,
     policy: { executionTimeout: 900000, ttl: 3600000 }
   },
   pro: {
     label: "Pro",
-    endpointId: "mthuo7674l6rfu",
-    apiKey: https://api.runpod.ai/v2/mthuo7674l6rfu/run,
+    endpointId: "PUT_PRO_ENDPOINT_ID_HERE",
+    apiKey: RUNPOD_API_KEY,
     policy: { executionTimeout: 1200000, ttl: 3600000 }
   }
 };
@@ -234,7 +228,6 @@ function normalizeOcdModelKey(payload) {
 
   if (raw.includes("fast") || raw.includes("edge")) return "fast";
   if (raw.includes("pro")) return "pro";
-  if (raw.includes("thinker")) return "thinker";
   if (raw.includes("quality") || raw.includes("omni") || raw.includes("omnivoice")) return "quality";
   return DEFAULT_RUNPOD_MODEL;
 }
@@ -282,9 +275,36 @@ function findRunpodModelByEndpointId(endpointId) {
   return DEFAULT_RUNPOD_MODEL;
 }
 
+function normalizeOcdVoiceNameForModel(payload, modelKey) {
+  const raw = String(
+    payload?.voiceName ||
+    payload?.voice ||
+    payload?.selectedVoice ||
+    payload?.voiceRole ||
+    ""
+  ).trim();
+
+  if (modelKey === "fast") {
+    // Fast uses Microsoft Edge voice names such as ar-SA-HamedNeural.
+    return raw || "ar-SA-HamedNeural";
+  }
+
+  // Quality/Pro use either auto clone or one of the four ready sample voice keys.
+  const value = (raw || "auto-clone-video").toLowerCase();
+  const allowed = new Set([
+    "auto-clone-video",
+    "ocd-orion-male",
+    "ocd-salem-male",
+    "ocd-lina-female",
+    "ocd-noura-female"
+  ]);
+  return allowed.has(value) ? value : "auto-clone-video";
+}
+
 async function startRunpodServerlessJob(payload) {
   const modelKey = normalizeOcdModelKey(payload || {});
   const { key, config } = getRunpodEndpointConfig(modelKey);
+  const normalizedVoiceName = normalizeOcdVoiceNameForModel(payload || {}, key);
 
   // Serverless handler returns base64 MP3. Browser cookies are stripped server-side unless explicitly enabled.
   const res = await fetch(`https://api.runpod.ai/v2/${config.endpointId}/run`, {
@@ -297,7 +317,9 @@ async function startRunpodServerlessJob(payload) {
       input: {
         ...(payload || {}),
         model: key,
-        ocdModel: key
+        modelName: key,
+        ocdModel: key,
+        voiceName: normalizedVoiceName
       },
       policy: config.policy || { executionTimeout: 900000, ttl: 3600000 }
     })

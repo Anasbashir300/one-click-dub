@@ -573,6 +573,140 @@ OMNIVOICE_DESIGN_PRESETS = {
     'nverguo.wav': 'nverguo.wav',
 }
 
+
+# ---------------- Ready voice presets for Quality/Pro ----------------
+# These are fixed reference-sample voices that the popup can show for Quality/Pro.
+# Put matching WAV files in one of these folders on the RunPod volume:
+#   /runpod-volume/one-click-dub/ready_voice_refs/
+#   /runpod-volume/one-click-dub/omnivoice_refs/
+#   /runpod-volume/one-click-dub/fish_speech_refs/
+# File names expected by default:
+#   ocd_orion_male.wav, ocd_salem_male.wav, ocd_lina_female.wav, ocd_noura_female.wav
+READY_VOICE_PRESETS = {
+    'auto-clone-video': {
+        'label_ar': 'استنساخ صوت الفيديو',
+        'mode': 'auto',
+    },
+    'ocd-orion-male': {
+        'label_ar': 'أوريون — صوت رجالي عميق',
+        'sample': 'ocd_orion_male.wav',
+        'gender': 'male',
+    },
+    'ocd-salem-male': {
+        'label_ar': 'سالم — صوت رجالي دافئ',
+        'sample': 'ocd_salem_male.wav',
+        'gender': 'male',
+    },
+    'ocd-lina-female': {
+        'label_ar': 'لينا — صوت نسائي ناعم',
+        'sample': 'ocd_lina_female.wav',
+        'gender': 'female',
+    },
+    'ocd-noura-female': {
+        'label_ar': 'نورا — صوت نسائي واضح',
+        'sample': 'ocd_noura_female.wav',
+        'gender': 'female',
+    },
+}
+
+READY_VOICE_ALIASES = {
+    'auto': 'auto-clone-video',
+    'auto-clone': 'auto-clone-video',
+    'auto-clone-video': 'auto-clone-video',
+    'clone-video': 'auto-clone-video',
+    'استنساخ صوت الفيديو': 'auto-clone-video',
+    'orion': 'ocd-orion-male',
+    'أوريون': 'ocd-orion-male',
+    'salem': 'ocd-salem-male',
+    'سالم': 'ocd-salem-male',
+    'lina': 'ocd-lina-female',
+    'لينا': 'ocd-lina-female',
+    'noura': 'ocd-noura-female',
+    'نورا': 'ocd-noura-female',
+}
+
+
+def normalize_ready_voice_name(voice_name: str) -> str:
+    raw = str(voice_name or '').strip()
+    low = raw.lower()
+    if low in READY_VOICE_PRESETS:
+        return low
+    if low in READY_VOICE_ALIASES:
+        return READY_VOICE_ALIASES[low]
+    if raw in READY_VOICE_ALIASES:
+        return READY_VOICE_ALIASES[raw]
+    # Keep direct wav/mp3 filenames working for advanced/manual use.
+    return raw
+
+
+def is_auto_clone_voice(voice_name: str) -> bool:
+    key = normalize_ready_voice_name(voice_name)
+    return key in ('', 'auto', 'auto-clone-video', 'auto-clone', 'clone-video') or READY_VOICE_PRESETS.get(key, {}).get('mode') == 'auto'
+
+
+def ready_voice_sample_filename(voice_name: str) -> Optional[str]:
+    key = normalize_ready_voice_name(voice_name)
+    preset = READY_VOICE_PRESETS.get(key)
+    if preset and preset.get('sample'):
+        return str(preset['sample'])
+    # Direct audio filename from UI/env.
+    raw = str(voice_name or '').strip()
+    if raw.lower().endswith(('.wav', '.mp3', '.m4a', '.flac', '.ogg')):
+        return raw
+    return None
+
+
+def find_ready_voice_ref_audio(voice_name: str, engine: str = 'generic') -> Optional[str]:
+    """Find a fixed reference sample for Quality/Pro selected voices.
+
+    This lets the popup send voiceName='ocd-orion-male' and the backend resolves it
+    to a WAV file. Auto clone is handled separately and does not use this function.
+    """
+    filename = ready_voice_sample_filename(voice_name)
+    if not filename:
+        return None
+    p = Path(filename)
+    if p.is_absolute() and p.exists() and p.is_file():
+        return str(p)
+
+    engine_key = str(engine or '').lower()
+    search_dirs = []
+    if engine_key.startswith('fish'):
+        search_dirs.append(Path(os.environ.get('OCD_FISH_SPEECH_REFS_DIR', str(ROOT / 'fish_speech_refs'))))
+    if engine_key.startswith('omni'):
+        search_dirs.append(Path(os.environ.get('OCD_OMNIVOICE_REFS_DIR', str(ROOT / 'omnivoice_refs'))))
+    search_dirs += [
+        Path(os.environ.get('OCD_READY_VOICE_REFS_DIR', str(ROOT / 'ready_voice_refs'))),
+        ROOT / 'ready_voice_refs',
+        ROOT / 'omnivoice_refs',
+        ROOT / 'fish_speech_refs',
+        ROOT,
+    ]
+    names = [filename]
+    stem = Path(filename).stem
+    for ext in ('.wav', '.mp3', '.m4a', '.flac', '.ogg'):
+        if not filename.lower().endswith(ext):
+            names.append(stem + ext)
+    seen = set()
+    for d in search_dirs:
+        try:
+            if not d.exists():
+                continue
+            for name in names:
+                if name in seen:
+                    continue
+                seen.add(name)
+                cand = d / name
+                if cand.exists() and cand.is_file():
+                    return str(cand)
+            for name in names:
+                found = list(d.rglob(name))[:1]
+                if found:
+                    return str(found[0])
+        except Exception:
+            pass
+    return None
+
 OMNIVOICE_VALID_EN_INSTRUCT_ITEMS = {
     'american accent', 'australian accent', 'british accent', 'canadian accent',
     'child', 'chinese accent', 'elderly', 'female', 'high pitch',
@@ -1599,6 +1733,10 @@ def omnivoice_language_for(target_lang: str) -> Optional[str]:
 
 def find_omnivoice_ref_audio(role: str) -> Optional[str]:
     """Find a reference wav/mp3/m4a for OmniVoice voice cloning."""
+    role = normalize_ready_voice_name(role)
+    ready_ref = find_ready_voice_ref_audio(role, engine='omnivoice')
+    if ready_ref:
+        return ready_ref
     role = str(role or '').strip()
     if not role or role.startswith('design-'):
         return None
@@ -1636,11 +1774,12 @@ def find_omnivoice_ref_audio(role: str) -> Optional[str]:
 def resolve_omnivoice_role(requested: str, auto_ref_audio: Optional[str] = None) -> Dict[str, Any]:
     """Return OmniVoice mode + role/instruct/ref_audio.
 
-    When auto_ref_audio is provided, it wins over fixed samples/design voices. That gives
-    each video/job its own cloned reference voice and prevents cross-video voice mixing.
+    Auto clone is used only when the selected voice is auto-clone-video. If the popup sends
+    one of the 4 ready voice keys, that fixed reference sample is used instead.
     """
+    requested = normalize_ready_voice_name(requested)
     auto_ref = str(auto_ref_audio or '').strip()
-    if auto_ref and env_bool('OCD_OMNIVOICE_AUTO_CLONE', '1'):
+    if auto_ref and env_bool('OCD_OMNIVOICE_AUTO_CLONE', '1') and is_auto_clone_voice(requested):
         p = Path(auto_ref)
         if p.exists() and p.is_file():
             return {
@@ -1920,9 +2059,14 @@ def fish_speech_tts_save(text: str, voice_role: str, target_lang: str, out_path:
     clean = clean_tts_text(text)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    voice_role = normalize_ready_voice_name(voice_role)
     ref_audio = str(auto_ref_audio or '').strip()
-    if env_bool('OCD_FISH_SPEECH_AUTO_CLONE', '1') and not ref_audio:
+    if not ref_audio:
+        ref_audio = str(find_ready_voice_ref_audio(voice_role, engine='fish_speech') or '').strip()
+    if env_bool('OCD_FISH_SPEECH_AUTO_CLONE', '1') and is_auto_clone_voice(voice_role) and not ref_audio:
         raise RuntimeError('Fish Speech Pro requires an auto-clone reference audio. Check OCD_FISH_SPEECH_AUTO_CLONE and ref extraction logs.')
+    if not ref_audio:
+        raise RuntimeError(f'Fish Speech Pro needs a voice reference. Selected voice={voice_role!r}; add its WAV file to fish_speech_refs/ or choose auto-clone-video.')
 
     cmd_template = os.environ.get('OCD_FISH_SPEECH_COMMAND', '').strip()
     if cmd_template:
@@ -2155,7 +2299,12 @@ def process_job_impl(job_id: str, req: DubRequest):
             raise RuntimeError('Whisper did not return any speech segments')
         (job_dir / 'asr_segments.json').write_text(json.dumps(raw_segments, ensure_ascii=False, indent=2), encoding='utf-8')
 
-        if model == 'quality' and env_bool('OCD_OMNIVOICE_AUTO_CLONE', '1'):
+        selected_voice_name = normalize_ready_voice_name(str(req.voiceName or 'auto-clone-video').strip() or 'auto-clone-video')
+        selected_voice_is_auto_clone = is_auto_clone_voice(selected_voice_name)
+        job['selectedVoiceName'] = selected_voice_name
+        job['selectedVoiceIsAutoClone'] = selected_voice_is_auto_clone
+
+        if model == 'quality' and env_bool('OCD_OMNIVOICE_AUTO_CLONE', '1') and selected_voice_is_auto_clone:
             job.update(status='voice-clone', progress=31, message='Preparing per-job OmniVoice voice sample from this video')
             omnivoice_auto_ref_audio, _omnivoice_ref_text = create_auto_clone_ref_audio(audio_wav, raw_segments, job_dir, job, engine='omnivoice')
             if omnivoice_auto_ref_audio:
@@ -2163,7 +2312,7 @@ def process_job_impl(job_id: str, req: DubRequest):
             else:
                 job['voiceClone'] = 'fallback-design-or-selected-role'
 
-        if model == 'pro' and env_bool('OCD_FISH_SPEECH_AUTO_CLONE', '1'):
+        if model == 'pro' and env_bool('OCD_FISH_SPEECH_AUTO_CLONE', '1') and selected_voice_is_auto_clone:
             job.update(status='voice-clone', progress=31, message='Preparing per-job Fish Speech voice sample from this video')
             fish_auto_ref_audio, fish_auto_ref_text = create_auto_clone_ref_audio(audio_wav, raw_segments, job_dir, job, engine='fish_speech')
             if fish_auto_ref_audio:
@@ -2247,19 +2396,19 @@ def process_job_impl(job_id: str, req: DubRequest):
 
         if model == 'quality':
             tts_backend = 'omnivoice'
-            voice = str(req.voiceName or os.environ.get('OCD_OMNIVOICE_ROLE', 'auto-clone-video')).strip() or 'auto-clone-video'
+            voice = selected_voice_name or normalize_ready_voice_name(os.environ.get('OCD_OMNIVOICE_ROLE', 'auto-clone-video'))
             job['requestedVoiceName'] = voice
-            job['voiceName'] = 'auto-clone-from-video' if omnivoice_auto_ref_audio else voice
+            job['voiceName'] = 'auto-clone-from-video' if (selected_voice_is_auto_clone and omnivoice_auto_ref_audio) else voice
             job['ttsBackend'] = 'omnivoice'
-            voice_label = 'Auto Clone from this video' if omnivoice_auto_ref_audio else voice
+            voice_label = 'Auto Clone from this video' if (selected_voice_is_auto_clone and omnivoice_auto_ref_audio) else voice
             job.update(status='tts', progress=60, message=f'Generating OmniVoice Quality: {len(chunks)} chunks · {voice_label}')
         elif model == 'pro':
             tts_backend = 'fish-speech'
-            voice = str(req.voiceName or os.environ.get('OCD_FISH_SPEECH_VOICE', 'auto-clone-video')).strip() or 'auto-clone-video'
+            voice = selected_voice_name or normalize_ready_voice_name(os.environ.get('OCD_FISH_SPEECH_VOICE', 'auto-clone-video'))
             job['requestedVoiceName'] = voice
-            job['voiceName'] = 'auto-clone-from-video' if fish_auto_ref_audio else voice
+            job['voiceName'] = 'auto-clone-from-video' if (selected_voice_is_auto_clone and fish_auto_ref_audio) else voice
             job['ttsBackend'] = 'fish-speech'
-            voice_label = 'Auto Clone from this video' if fish_auto_ref_audio else voice
+            voice_label = 'Auto Clone from this video' if (selected_voice_is_auto_clone and fish_auto_ref_audio) else voice
             job.update(status='tts', progress=60, message=f'Generating Fish Speech Pro: {len(chunks)} chunks · {voice_label}')
         else:
             tts_backend = 'edge-tts'
@@ -2276,15 +2425,15 @@ def process_job_impl(job_id: str, req: DubRequest):
             text = clean_tts_text(c.get('ttsText') or c.get('translatedText') or c.get('text') or '')
             if model == 'quality':
                 raw_path = tts_dir / f'chunk_{i:04d}_omnivoice_raw.wav'
-                resolved_omnivoice_role = omnivoice_tts_save(text, voice, target, raw_path, float(c['end']) - float(c['start']), auto_ref_audio=str(omnivoice_auto_ref_audio) if omnivoice_auto_ref_audio else None)
+                resolved_omnivoice_role = omnivoice_tts_save(text, voice, target, raw_path, float(c['end']) - float(c['start']), auto_ref_audio=str(omnivoice_auto_ref_audio) if (selected_voice_is_auto_clone and omnivoice_auto_ref_audio) else None)
                 # Quality/OmniVoice gets a small volume lift but less than clipping level.
                 convert_tts_to_wav(raw_path, wav_path, float(c['end']) - float(c['start']), volume=float(os.environ.get('OCD_OMNIVOICE_VOLUME', '1.06')))
             elif model == 'pro':
                 raw_path = tts_dir / f'chunk_{i:04d}_fish_raw.wav'
                 resolved_fish_role = fish_speech_tts_save(
                     text, voice, target, raw_path, float(c['end']) - float(c['start']),
-                    auto_ref_audio=str(fish_auto_ref_audio) if fish_auto_ref_audio else None,
-                    ref_text=fish_auto_ref_text,
+                    auto_ref_audio=str(fish_auto_ref_audio) if (selected_voice_is_auto_clone and fish_auto_ref_audio) else None,
+                    ref_text=fish_auto_ref_text if selected_voice_is_auto_clone else '',
                 )
                 convert_tts_to_wav(raw_path, wav_path, float(c['end']) - float(c['start']), volume=float(os.environ.get('OCD_FISH_SPEECH_VOLUME', '1.0')))
             else:
