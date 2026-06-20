@@ -1,0 +1,19 @@
+# One Click Dub Quality endpoint - OmniVoice only, no Fish Speech.
+FROM runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
+ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/runpod-volume/.cache/huggingface TRANSFORMERS_CACHE=/runpod-volume/.cache/huggingface \
+    XDG_CACHE_HOME=/runpod-volume/.cache OCD_ROOT=/runpod-volume/one-click-dub \
+    OCD_RUNPOD_SERVERLESS=1 OCD_MODEL=quality OCD_TTS_ENGINE=omnivoice OCD_TRANSLATION_ENGINE=nllb200 \
+    OCD_OMNIVOICE_AUTO_CLONE=1 OCD_USE_CATT_TASHKEEL=1 OCD_SAFE_TASHKEEL=1 \
+    OCD_USE_PUNCTUATION=1 OCD_TTS_PUNCT_PAUSES=1
+WORKDIR /app
+RUN apt-get update -y && apt-get install -y --no-install-recommends ffmpeg git curl wget unzip ca-certificates nodejs npm libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL https://deno.land/install.sh | sh
+ENV PATH="/root/.deno/bin:${PATH}"
+COPY requirements_quality.txt /app/requirements_quality.txt
+RUN python -m pip install --no-cache-dir --ignore-installed -U pip setuptools packaging wheel \
+    && python -m pip install --no-cache-dir -r /app/requirements_quality.txt \
+    && (python -c "import omnivoice; print('omnivoice ok')" || python -m pip install --no-cache-dir git+https://github.com/k2-fsa/OmniVoice.git)
+COPY . /app
+CMD ["python", "-u", "handler.py"]

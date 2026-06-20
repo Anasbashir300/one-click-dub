@@ -1,0 +1,17 @@
+# One Click Dub Fast endpoint - lightweight: Edge TTS only, no OmniVoice/Fish Speech.
+FROM runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
+ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/runpod-volume/.cache/huggingface TRANSFORMERS_CACHE=/runpod-volume/.cache/huggingface \
+    XDG_CACHE_HOME=/runpod-volume/.cache OCD_ROOT=/runpod-volume/one-click-dub \
+    OCD_RUNPOD_SERVERLESS=1 OCD_MODEL=fast OCD_TTS_ENGINE=edge OCD_TRANSLATION_ENGINE=google \
+    OCD_USE_CATT_TASHKEEL=1 OCD_SAFE_TASHKEEL=1 OCD_USE_PUNCTUATION=1 OCD_TTS_PUNCT_PAUSES=1
+WORKDIR /app
+RUN apt-get update -y && apt-get install -y --no-install-recommends ffmpeg git curl wget unzip ca-certificates nodejs npm libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL https://deno.land/install.sh | sh
+ENV PATH="/root/.deno/bin:${PATH}"
+COPY requirements_fast.txt /app/requirements_fast.txt
+RUN python -m pip install --no-cache-dir --ignore-installed -U pip setuptools packaging wheel \
+    && python -m pip install --no-cache-dir -r /app/requirements_fast.txt
+COPY . /app
+CMD ["python", "-u", "handler.py"]

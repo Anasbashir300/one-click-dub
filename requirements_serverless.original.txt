@@ -15,11 +15,9 @@ pydub
 transformers
 sentencepiece
 accelerate
-huggingface_hub[cli]
+huggingface_hub
 sacremoses
 protobuf
 catt-tashkeel
 safetensors
 omnivoice
-# Fish Speech is installed from the official GitHub repo in Dockerfile,
-# not from pip, because the self-hosted OpenAudio/Fish Speech server uses tools.api_server.
