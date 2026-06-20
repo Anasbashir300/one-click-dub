@@ -1,63 +1,164 @@
-def handler(job):
-    job_input = job.get("input", {}) or {}
+"""RunPod Serverless entry point for One Click Dub.
 
-    requested_model = job_input.get("model") or env_str("OCD_MODEL", "fast")
-    cfg = get_pipeline_config(requested_model)
+Latest wrapper updates:
+- supports only fast / quality / pro
+- routes model defaults into job["input"]
+- enforces CATT tashkeel flags for all models
+- keeps numbers/punctuation preservation flags enabled
+- avoids exposing RunPod internals to the extension
 
-    video_url = job_input.get("videoUrl") or job_input.get("url")
-    target_lang = job_input.get("targetLang", "ar")
-    source_lang = job_input.get("sourceLang", "auto")
+Important:
+The real dubbing pipeline still lives in serverless_handler.py.
+This wrapper prepares and validates the job before passing it to
+serverless_handler.handler.
+"""
 
-    job_id = job.get("id") or "local_job"
-    job_dir = Path("/runpod-volume/one-click-dub/jobs") / str(job_id)
-    job_dir.mkdir(parents=True, exist_ok=True)
+from __future__ import annotations
 
-    print("OCD:", cfg)
+import copy
+import os
+from typing import Any, Dict
 
-    audio_path = download_video_audio(video_url, job_dir)
+import runpod
+from serverless_handler import handler as _serverless_handler
 
-    segments = transcribe_audio(
-        audio_path=audio_path,
-        whisper_model=cfg["whisper_model"],
-        source_lang=source_lang,
-    )
 
-    if cfg["auto_clone"]:
-        ref_audio_path, ref_text = create_auto_clone_reference(
-            source_audio_path=audio_path,
-            segments=segments,
-            job_dir=job_dir,
-            seconds=cfg["ref_seconds"],
-        )
-    else:
-        ref_audio_path, ref_text = None, None
+ALLOWED_MODELS = {"fast", "quality", "pro"}
 
-    text = segments_to_text(segments)
+MODEL_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    "fast": {
+        "ttsEngine": "edge",
+        "tts_engine": "edge",
+        "translationEngine": "google",
+        "translation_engine": "google",
+        "autoClone": False,
+        "useOmniVoice": False,
+        "useFishSpeech": False,
+        "audioBitrate": "128k",
+        "chunkMaxChars": 450,
+        "chunkMinChars": 180,
+    },
+    "quality": {
+        "ttsEngine": "omnivoice",
+        "tts_engine": "omnivoice",
+        "translationEngine": "nllb",
+        "translation_engine": "nllb",
+        "autoClone": True,
+        "useOmniVoice": True,
+        "useFishSpeech": False,
+        "audioBitrate": "192k",
+        "chunkMaxChars": 380,
+        "chunkMinChars": 160,
+    },
+    "pro": {
+        "ttsEngine": "fish_speech",
+        "tts_engine": "fish_speech",
+        "translationEngine": "nllb",
+        "translation_engine": "nllb",
+        "autoClone": True,
+        "useOmniVoice": False,
+        "useFishSpeech": True,
+        "audioBitrate": "256k",
+        "chunkMaxChars": 320,
+        "chunkMinChars": 120,
+    },
+}
 
-    if cfg["use_punctuation"]:
-        text = restore_punctuation(text)
 
-    translated_text = translate_text(
-        text=text,
-        target_lang=target_lang,
-        engine=cfg["translation_engine"],
-        nllb_model=cfg.get("nllb_model"),
-    )
+def _env(name: str, default: str = "") -> str:
+    return os.getenv(name, default).strip()
 
-    if cfg["use_catt"] and target_lang.startswith("ar"):
-        translated_text = apply_catt_tashkeel(translated_text)
 
-    chunks = smart_chunk_text(
-        translated_text,
-        max_chars=cfg["chunk_max_chars"],
-    )
+def _normalize_model(value: Any) -> str:
+    raw = str(value or "").strip().lower()
 
-    final_audio_path = synthesize_dubbed_audio(
-        chunks=chunks,
-        cfg=cfg,
-        job_dir=job_dir,
-        ref_audio_path=ref_audio_path,
-        ref_text=ref_text,
-    )
+    if raw in ("fast", "speed", "quick"):
+        return "fast"
+    if raw in ("quality", "omni", "omnivoice"):
+        return "quality"
+    if raw in ("pro", "fish", "fish_speech", "fish-speech"):
+        return "pro"
 
-    return build_audio_response(final_audio_path, cfg)
+    env_model = _env("OCD_MODEL") or _env("OCD_ENDPOINT_MODEL") or "fast"
+    env_model = env_model.lower()
+
+    if env_model in ALLOWED_MODELS:
+        return env_model
+
+    return "fast"
+
+
+def _set_common_env_defaults() -> None:
+    """Set safe defaults if the endpoint has not defined them."""
+
+    # Every model should use Arabic tashkeel when target language is Arabic.
+    os.environ.setdefault("OCD_USE_CATT_TASHKEEL", "1")
+
+    # Required so CATT wrapper keeps digits, dates, percentages, currency,
+    # English text, links, and punctuation marks instead of deleting them.
+    os.environ.setdefault("OCD_CATT_PRESERVE_SYMBOLS", "1")
+    os.environ.setdefault("OCD_SAFE_TASHKEEL", "1")
+
+    # Keep punctuation pauses for TTS naturalness.
+    os.environ.setdefault("OCD_USE_PUNCTUATION", "1")
+    os.environ.setdefault("OCD_TTS_PUNCT_PAUSES", "1")
+
+    # Extension expects audioBase64 unless serverless_handler returns audioUrl.
+    os.environ.setdefault("OCD_RETURN_AUDIO_BASE64", "1")
+    os.environ.setdefault("OCD_OUTPUT_FORMAT", "mp3")
+
+    # YouTube / yt-dlp safety defaults used in the previous debugging path.
+    os.environ.setdefault("OCD_YTDLP_REMOTE_EJS", "1")
+    os.environ.setdefault("OCD_YTDLP_USE_REQUEST_COOKIES", "0")
+
+    # Cleanup defaults.
+    os.environ.setdefault("OCD_JOB_TEMP_TTL_SEC", "600")
+    os.environ.setdefault("OCD_OUTPUT_TTL_SEC", "21600")
+    os.environ.setdefault("OCD_JOB_ERROR_TEMP_TTL_SEC", "1800")
+
+
+def _prepare_job(job: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize model/input before calling the real serverless handler."""
+
+    _set_common_env_defaults()
+
+    prepared = copy.deepcopy(job or {})
+    job_input = prepared.get("input") or {}
+    if not isinstance(job_input, dict):
+        job_input = {}
+
+    model = _normalize_model(job_input.get("model"))
+    defaults = MODEL_DEFAULTS[model]
+
+    job_input["model"] = model
+    job_input["ocdModel"] = model
+
+    # Apply only missing fields so the extension can override intentionally.
+    for key, value in defaults.items():
+        job_input.setdefault(key, value)
+
+    # Latest required behavior: all models use CATT safely for Arabic.
+    job_input.setdefault("useCattTashkeel", True)
+    job_input.setdefault("safeTashkeel", True)
+    job_input.setdefault("preserveSymbols", True)
+    job_input.setdefault("preserveNumbers", True)
+    job_input.setdefault("preservePunctuation", True)
+    job_input.setdefault("returnAudioBase64", True)
+
+    # Print clear diagnostics in RunPod logs.
+    print("OCD ENTRYPOINT: model =", model)
+    print("OCD ENTRYPOINT: ttsEngine =", job_input.get("ttsEngine"))
+    print("OCD ENTRYPOINT: translationEngine =", job_input.get("translationEngine"))
+    print("OCD ENTRYPOINT: useCattTashkeel =", job_input.get("useCattTashkeel"))
+    print("OCD ENTRYPOINT: preserveSymbols =", job_input.get("preserveSymbols"))
+
+    prepared["input"] = job_input
+    return prepared
+
+
+def handler(job: Dict[str, Any]) -> Any:
+    prepared_job = _prepare_job(job)
+    return _serverless_handler(prepared_job)
+
+
+runpod.serverless.start({"handler": handler})
