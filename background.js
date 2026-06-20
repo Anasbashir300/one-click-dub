@@ -8,9 +8,40 @@ const CUSTOM_DUB_SERVER_BASE = "https://YOUR-RUNPOD-POD-ID-8000.proxy.runpod.net
 // Serverless direct mode is for PRIVATE testing only.
 // Do not publish a Chrome extension with a RunPod API key inside it.
 // Production should use your own lightweight API gateway that keeps RUNPOD_API_KEY secret.
-const OCD_BACKEND_MODE = "fastapi"; // "fastapi" or "runpod-serverless"
-const RUNPOD_SERVERLESS_ENDPOINT_ID = "PUT_ENDPOINT_ID_HERE";
-const RUNPOD_API_KEY = "PUT_RUNPOD_API_KEY_HERE";
+const OCD_BACKEND_MODE = "runpod-serverless"
+const RUNPOD_SERVERLESS_ENDPOINT_ID = "jtk3716mehm2h7";
+const RUNPOD_API_KEY = "rpa_ZCEDLJNR3I075P9TF21OJF81JSZN3C986MQ7TZ4F2m92d4";
+
+// Each One Click Dub model can route to its own RunPod Serverless Endpoint.
+// Keep the current endpoint as the default Quality/OmniVoice endpoint, then replace
+// PUT_FAST_ENDPOINT_ID_HERE and PUT_PRO_ENDPOINT_ID_HERE with your real Endpoint IDs.
+const DEFAULT_RUNPOD_MODEL = "quality";
+const RUNPOD_SERVERLESS_ENDPOINTS = {
+  fast: {
+    label: "Fast",
+    endpointId: "jtk3716mehm2h7",
+    apiKey: https://api.runpod.ai/v2/jtk3716mehm2h7/run,
+    policy: { executionTimeout: 600000, ttl: 3600000 }
+  },
+  quality: {
+    label: "Quality / OmniVoice",
+    endpointId: o4hpowh4ekgx0d,
+    apiKey: https://api.runpod.ai/v2/o4hpowh4ekgx0d/run,
+    policy: { executionTimeout: 900000, ttl: 3600000 }
+  },
+  thinker: {
+    label: "Thinker / OmniVoice",
+    endpointId: RUNPOD_SERVERLESS_ENDPOINT_ID,
+    apiKey: RUNPOD_API_KEY,
+    policy: { executionTimeout: 900000, ttl: 3600000 }
+  },
+  pro: {
+    label: "Pro",
+    endpointId: "mthuo7674l6rfu",
+    apiKey: https://api.runpod.ai/v2/mthuo7674l6rfu/run,
+    policy: { executionTimeout: 1200000, ttl: 3600000 }
+  }
+};
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === "OCD_GET_YOUTUBE_COOKIES") {
@@ -161,7 +192,12 @@ async function postPvt(path, payload) {
 
 async function getPvt(path) {
   if (OCD_BACKEND_MODE === "runpod-serverless") {
-    const id = String(path || "").split("/").pop();
+    // path arrives like: /api/custom/jobs/rp%3A<runpod_job_id>
+    // Decode it before stripping the local "rp:" prefix; otherwise RunPod receives
+    // "rp%3A..." as the job id and /status returns HTTP 404.
+    const rawId = String(path || "").split("/").pop();
+    let id = rawId;
+    try { id = decodeURIComponent(rawId); } catch {}
     return getRunpodServerlessStatus(id);
   }
   const base = await getCustomDubServerBase();
@@ -175,54 +211,160 @@ async function getPvt(path) {
   return data;
 }
 
-function assertRunpodServerlessConfig() {
-  if (!RUNPOD_SERVERLESS_ENDPOINT_ID || RUNPOD_SERVERLESS_ENDPOINT_ID.includes("PUT_ENDPOINT")) {
-    throw new Error("Set RUNPOD_SERVERLESS_ENDPOINT_ID in background.js");
+function assertRunpodServerlessConfig(config, modelKey) {
+  if (!config?.endpointId || config.endpointId.includes("PUT_") || config.endpointId.includes("YOUR_")) {
+    throw new Error(`Set RunPod Serverless Endpoint ID for model ${modelKey || DEFAULT_RUNPOD_MODEL} in background.js`);
   }
-  if (!RUNPOD_API_KEY || RUNPOD_API_KEY.includes("PUT_RUNPOD")) {
+  if (!config?.apiKey || config.apiKey.includes("PUT_RUNPOD")) {
     throw new Error("Set RUNPOD_API_KEY in background.js for private testing, or use an API gateway for production");
   }
 }
 
+
+function normalizeOcdModelKey(payload) {
+  const raw = String(
+    payload?.model ||
+    payload?.mode ||
+    payload?.tier ||
+    payload?.quality ||
+    payload?.selectedModel ||
+    payload?.modelName ||
+    DEFAULT_RUNPOD_MODEL
+  ).toLowerCase().trim();
+
+  if (raw.includes("fast") || raw.includes("edge")) return "fast";
+  if (raw.includes("pro")) return "pro";
+  if (raw.includes("thinker")) return "thinker";
+  if (raw.includes("quality") || raw.includes("omni") || raw.includes("omnivoice")) return "quality";
+  return DEFAULT_RUNPOD_MODEL;
+}
+
+function getRunpodEndpointConfig(modelKey) {
+  const key = RUNPOD_SERVERLESS_ENDPOINTS[modelKey] ? modelKey : DEFAULT_RUNPOD_MODEL;
+  const config = RUNPOD_SERVERLESS_ENDPOINTS[key];
+  assertRunpodServerlessConfig(config, key);
+  return { key, config };
+}
+
+async function saveRunpodJobRoute(jobId, modelKey, endpointId) {
+  try {
+    if (!chrome.storage?.local?.set) return;
+    const cleanId = normalizeRunpodJobId(jobId);
+    await chrome.storage.local.set({
+      [`ocdRunpodJobRoute:${cleanId}`]: {
+        modelKey,
+        endpointId,
+        createdAt: Date.now()
+      }
+    });
+  } catch (error) {
+    console.warn("Could not save RunPod job route", error?.message || error);
+  }
+}
+
+async function getRunpodJobRoute(jobId) {
+  try {
+    if (!chrome.storage?.local?.get) return null;
+    const cleanId = normalizeRunpodJobId(jobId);
+    const key = `ocdRunpodJobRoute:${cleanId}`;
+    const saved = await chrome.storage.local.get(key);
+    return saved?.[key] || null;
+  } catch (error) {
+    console.warn("Could not read RunPod job route", error?.message || error);
+    return null;
+  }
+}
+
+function findRunpodModelByEndpointId(endpointId) {
+  for (const [key, config] of Object.entries(RUNPOD_SERVERLESS_ENDPOINTS)) {
+    if (config?.endpointId && config.endpointId === endpointId) return key;
+  }
+  return DEFAULT_RUNPOD_MODEL;
+}
+
 async function startRunpodServerlessJob(payload) {
-  assertRunpodServerlessConfig();
+  const modelKey = normalizeOcdModelKey(payload || {});
+  const { key, config } = getRunpodEndpointConfig(modelKey);
+
   // Serverless handler returns base64 MP3. Browser cookies are stripped server-side unless explicitly enabled.
-  const res = await fetch(`https://api.runpod.ai/v2/${RUNPOD_SERVERLESS_ENDPOINT_ID}/run`, {
+  const res = await fetch(`https://api.runpod.ai/v2/${config.endpointId}/run`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${RUNPOD_API_KEY}`
+      "Authorization": `Bearer ${config.apiKey}`
     },
-    body: JSON.stringify({ input: payload })
+    body: JSON.stringify({
+      input: {
+        ...(payload || {}),
+        model: key,
+        ocdModel: key
+      },
+      policy: config.policy || { executionTimeout: 900000, ttl: 3600000 }
+    })
   });
   const text = await res.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
-  if (!res.ok) throw new Error(data?.error || data?.message || `RunPod /run failed: HTTP ${res.status}`);
+  if (!res.ok) throw new Error(data?.error || data?.message || `RunPod /run failed for ${key}: HTTP ${res.status}`);
   const runpodJobId = data.id || data.jobId;
-  if (!runpodJobId) throw new Error("RunPod did not return a job id");
-  return { ok: true, jobId: `rp:${runpodJobId}`, service: "runpod-serverless" };
+  if (!runpodJobId) throw new Error(`RunPod did not return a job id for ${key}`);
+
+  await saveRunpodJobRoute(runpodJobId, key, config.endpointId);
+  console.log(`[OCD] RunPod Serverless ${key} job started:`, runpodJobId, "endpoint:", config.endpointId);
+  return { ok: true, jobId: runpodJobId, model: key, endpointId: config.endpointId, service: "runpod-serverless" };
+}
+
+function normalizeRunpodJobId(jobId) {
+  let cleanId = String(jobId || "").trim();
+
+  // Handle raw and URL-encoded local prefixes.
+  try { cleanId = decodeURIComponent(cleanId); } catch {}
+  cleanId = cleanId.replace(/^rp:/, "");
+  cleanId = cleanId.replace(/^rp%3A/i, "");
+
+  // Defensive cleanup in case a full local path or accidental URL is passed.
+  cleanId = cleanId.split("/").pop() || cleanId;
+  try { cleanId = decodeURIComponent(cleanId); } catch {}
+  cleanId = cleanId.replace(/^rp:/, "").replace(/^rp%3A/i, "").trim();
+
+  return cleanId;
 }
 
 async function getRunpodServerlessStatus(jobId) {
-  assertRunpodServerlessConfig();
-  const cleanId = String(jobId || "").replace(/^rp:/, "");
-  const res = await fetch(`https://api.runpod.ai/v2/${RUNPOD_SERVERLESS_ENDPOINT_ID}/status/${encodeURIComponent(cleanId)}`, {
-    headers: { "Authorization": `Bearer ${RUNPOD_API_KEY}` }
+  const cleanId = normalizeRunpodJobId(jobId);
+  if (!cleanId) {
+    throw new Error("RunPod /status failed: empty job id");
+  }
+
+  const route = await getRunpodJobRoute(cleanId);
+  const modelKey = route?.modelKey || findRunpodModelByEndpointId(route?.endpointId) || DEFAULT_RUNPOD_MODEL;
+  const { key, config } = getRunpodEndpointConfig(modelKey);
+  const endpointId = route?.endpointId || config.endpointId;
+  assertRunpodServerlessConfig({ ...config, endpointId }, key);
+
+  const statusUrl = `https://api.runpod.ai/v2/${endpointId}/status/${encodeURIComponent(cleanId)}`;
+  const res = await fetch(statusUrl, {
+    headers: { "Authorization": `Bearer ${config.apiKey}` }
   });
   const text = await res.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
-  if (!res.ok) throw new Error(data?.error || data?.message || `RunPod /status failed: HTTP ${res.status}`);
+  if (!res.ok) {
+    const details = data?.error || data?.message || data?.raw || "";
+    if (res.status === 404) {
+      throw new Error(`RunPod /status failed: HTTP 404 for job ${cleanId} on ${key} endpoint ${endpointId}. Check that /run and /status use the same Endpoint ID, and that the job TTL has not expired.`);
+    }
+    throw new Error(`RunPod /status failed: HTTP ${res.status} for ${key} job ${cleanId}${details ? " · " + details : ""}`);
+  }
 
   const st = String(data.status || "").toUpperCase();
   if (st === "COMPLETED") {
     const out = data.output || {};
     if (out.ok === false) {
-      return { ok: false, status: "error", progress: 100, error: out.error || "RunPod worker failed", message: out.error || "RunPod worker failed" };
+      return { ok: false, status: "error", progress: 100, error: out.error || "RunPod worker failed", message: out.error || "RunPod worker failed", model: key };
     }
     if (!out.audioBase64) {
-      return { ok: false, status: "error", progress: 100, error: "Worker completed but did not return audioBase64", message: "Missing audioBase64" };
+      return { ok: false, status: "error", progress: 100, error: "Worker completed but did not return audioBase64", message: "Missing audioBase64", model: key };
     }
     return {
       ok: true,
@@ -231,13 +373,16 @@ async function getRunpodServerlessStatus(jobId) {
       message: `Done · ${out.audioBytes || 0} bytes · ${out.elapsedSec || "?"} sec`,
       outputKind: "audio",
       audioUrl: `data:${out.audioMime || "audio/mpeg"};base64,${out.audioBase64}`,
-      runpod: { id: cleanId, delayTime: data.delayTime, executionTime: data.executionTime },
+      model: key,
+      endpointId,
+      runpod: { id: cleanId, endpointId, model: key, delayTime: data.delayTime, executionTime: data.executionTime },
       meta: out.meta || {}
     };
   }
   if (["FAILED", "CANCELLED", "TIMED_OUT"].includes(st)) {
-    return { ok: false, status: "error", progress: 100, error: data.error || data.message || `RunPod job ${st}`, message: data.error || data.message || `RunPod job ${st}` };
+    return { ok: false, status: "error", progress: 100, error: data.error || data.message || `RunPod job ${st}`, message: data.error || data.message || `RunPod job ${st}`, model: key, endpointId };
   }
   const progress = st === "IN_QUEUE" ? 3 : 35;
-  return { ok: true, status: st === "IN_QUEUE" ? "queued" : "processing", progress, message: `RunPod Serverless: ${st || "processing"}` };
+  return { ok: true, status: st === "IN_QUEUE" ? "queued" : "processing", progress, message: `RunPod Serverless ${key}: ${st || "processing"}`, model: key, endpointId };
 }
+
