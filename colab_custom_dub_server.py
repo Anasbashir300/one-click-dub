@@ -1,6 +1,6 @@
 # One Click Dub -> RunPod RTX Backend
 # Pipeline: yt-dlp -> ffmpeg audio extraction -> faster-whisper/OpenAI Whisper ASR -> Smart Chunking
-# -> Google/NLLB-200 translation -> optional CATT Arabic tashkeel -> Edge/OmniVoice TTS -> audio timeline mix -> final audio overlay.
+# -> Google/NLLB-200 translation -> safe CATT Arabic tashkeel -> Edge/OmniVoice/Fish Speech TTS -> audio timeline mix -> final audio overlay.
 
 import os
 import re
@@ -117,8 +117,8 @@ class DubRequest(BaseModel):
     whisperModel: str = 'large'  # fast=openai-whisper large by default, quality=medium, pro preview=turbo
     cuda: bool = True
     subtitleType: int = 0
-    modelName: str = 'fast'       # fast=edge | quality=omnivoice | pro=fish-speech-s1-mini-soon
-    ttsType: Optional[int] = None  # 0 Edge | 2 OmniVoice. Pro/Fish is UI-only for now.
+    modelName: str = 'fast'       # fast=edge | quality=omnivoice | pro=fish-speech
+    ttsType: Optional[int] = None  # 0 Edge | 2 OmniVoice | 3 Fish Speech
     translationEngine: Optional[str] = None  # fast=google | quality/pro=nllb200
     pageUrl: Optional[str] = None
     referer: Optional[str] = None
@@ -628,31 +628,112 @@ def get_catt_model():
     return _CATT_MODEL
 
 
-def apply_catt_tashkeel_batch(texts: List[str]) -> List[str]:
-    """Return diacritized Arabic texts. Fallback to original text on any CATT failure."""
-    cleaned = [clean_text(t) for t in texts]
+
+ARABIC_SAFE_LETTERS = r'\u0621-\u063A\u0641-\u064A\u0671-\u06D3\u06FA-\u06FF'
+ARABIC_SAFE_RUN_RE = re.compile(rf'[{ARABIC_SAFE_LETTERS}]+(?:\s+[{ARABIC_SAFE_LETTERS}]+)*')
+
+
+def split_long_arabic_run_for_catt(text: str, max_chars: int = 220) -> List[str]:
+    """Split Arabic-only spans for CATT while keeping word order."""
+    words = str(text or '').split()
+    if not words:
+        return []
+    chunks: List[str] = []
+    current: List[str] = []
+    for word in words:
+        candidate = ' '.join(current + [word]) if current else word
+        if current and len(candidate) > max_chars:
+            chunks.append(' '.join(current))
+            current = [word]
+        else:
+            current.append(word)
+    if current:
+        chunks.append(' '.join(current))
+    return chunks
+
+
+def _apply_catt_raw_batch(arabic_texts: List[str]) -> List[str]:
+    """Run CATT on already-isolated Arabic text only. Never raises to caller."""
+    cleaned = [clean_text(t) for t in arabic_texts]
     if not cleaned:
         return cleaned
     try:
         model = get_catt_model()
-        # CATT expects Arabic text; we pass one chunk per TTS segment.
         out = model.do_tashkeel_batch(cleaned, verbose=False)
         if isinstance(out, str):
             out = [out]
         out = list(out)
-        # Guard against unexpected output length.
         if len(out) != len(cleaned):
             return cleaned
-        result = []
+        result: List[str] = []
         for original, shaped in zip(cleaned, out):
             shaped = clean_text(shaped)
-            # Avoid empty/broken output.
+            # Keep original if the model returns empty/non-Arabic output.
             result.append(shaped if shaped and ARABIC_LETTERS_RE.search(shaped) else original)
         return result
     except Exception as e:
         print('[OCD] CATT tashkeel failed; continuing without tashkeel:', repr(e))
         return cleaned
 
+
+def apply_catt_tashkeel_preserve_symbols(texts: List[str]) -> List[str]:
+    """Diacritize Arabic words while preserving numbers, punctuation, symbols and Latin text.
+
+    CATT can damage or drop non-Arabic tokens when given mixed text. This wrapper extracts
+    Arabic-only spans, diacritizes those spans, then rebuilds the original text with all
+    non-Arabic content unchanged: 1,250$, 2026-06-20, %, links, commas, periods, etc.
+    """
+    cleaned = [clean_text(t) for t in texts]
+    max_run_chars = int(os.environ.get('OCD_CATT_SAFE_MAX_RUN_CHARS', '220'))
+
+    layouts: List[List[Any]] = []
+    arabic_runs: List[str] = []
+
+    for text in cleaned:
+        layout: List[Any] = []
+        last = 0
+        for match in ARABIC_SAFE_RUN_RE.finditer(text):
+            start, end = match.span()
+            if start > last:
+                layout.append(('literal', text[last:start]))
+            run = match.group(0)
+            run_indices: List[int] = []
+            for part in split_long_arabic_run_for_catt(run, max_chars=max_run_chars):
+                run_indices.append(len(arabic_runs))
+                arabic_runs.append(part)
+            layout.append(('arabic', run_indices, run))
+            last = end
+        if last < len(text):
+            layout.append(('literal', text[last:]))
+        layouts.append(layout)
+
+    shaped_runs = _apply_catt_raw_batch(arabic_runs) if arabic_runs else []
+    output: List[str] = []
+    for original, layout in zip(cleaned, layouts):
+        if not layout:
+            output.append(original)
+            continue
+        pieces: List[str] = []
+        for item in layout:
+            if item[0] == 'literal':
+                pieces.append(item[1])
+            else:
+                _kind, indices, original_run = item
+                shaped_parts = [shaped_runs[i] for i in indices if i < len(shaped_runs)]
+                shaped = ' '.join([p for p in shaped_parts if p]).strip()
+                pieces.append(shaped if shaped else original_run)
+        output.append(''.join(pieces))
+    return output
+
+
+def apply_catt_tashkeel_batch(texts: List[str]) -> List[str]:
+    """Return diacritized Arabic texts. Preserves numbers and punctuation by default."""
+    cleaned = [clean_text(t) for t in texts]
+    if not cleaned:
+        return cleaned
+    if env_bool('OCD_SAFE_TASHKEEL', '1'):
+        return apply_catt_tashkeel_preserve_symbols(cleaned)
+    return _apply_catt_raw_batch(cleaned)
 
 def edge_voice_for(target_lang: str, requested: str) -> str:
     requested = str(requested or '').strip()
@@ -1728,6 +1809,177 @@ def omnivoice_tts_save(text: str, voice_role: str, target_lang: str, out_path: P
     return voice
 
 
+def create_auto_clone_ref_audio(audio_wav: Path, raw_segments: List[Dict[str, Any]], job_dir: Path, job: Dict[str, Any], engine: str = 'generic') -> tuple[Optional[Path], str]:
+    """Create one temporary per-job reference sample from the current video.
+
+    Used by Quality/OmniVoice and Pro/Fish Speech. It extracts the first clear speech span
+    using Whisper timestamps instead of blindly cutting the first seconds, so music/silence is
+    less likely to become the voice reference.
+    """
+    try:
+        audio_wav = Path(audio_wav)
+        job_dir = Path(job_dir)
+        engine_key = re.sub(r'[^a-z0-9_]+', '_', str(engine or 'generic').lower()).strip('_') or 'generic'
+        if not audio_wav.exists() or not raw_segments:
+            return None, ''
+
+        prefix = 'OCD_FISH_SPEECH' if engine_key.startswith('fish') else 'OCD_OMNIVOICE'
+        target_sec = float(os.environ.get(f'{prefix}_REF_SECONDS', os.environ.get(f'{prefix}_AUTO_REF_SECONDS', '12')))
+        min_sec = float(os.environ.get(f'{prefix}_MIN_REF_SECONDS', os.environ.get(f'{prefix}_AUTO_REF_MIN_SEC', '6')))
+        max_sec = float(os.environ.get(f'{prefix}_MAX_REF_SECONDS', os.environ.get(f'{prefix}_AUTO_REF_MAX_SEC', str(max(14.0, target_sec)))))
+        max_sec = max(min_sec, max_sec)
+        pad_before = float(os.environ.get(f'{prefix}_AUTO_REF_PAD_BEFORE', '0.08'))
+        pad_after = float(os.environ.get(f'{prefix}_AUTO_REF_PAD_AFTER', '0.18'))
+        min_text_chars = int(os.environ.get(f'{prefix}_AUTO_REF_MIN_TEXT_CHARS', '8'))
+
+        chosen: List[Dict[str, Any]] = []
+        start = None
+        end = None
+        for seg in raw_segments:
+            txt = clean_text(seg.get('text', ''))
+            s = max(0.0, float(seg.get('start', 0.0)))
+            e = max(s, float(seg.get('end', 0.0)))
+            dur = e - s
+            if dur < 0.45 or len(txt) < min_text_chars:
+                continue
+            if start is None:
+                start = max(0.0, s - pad_before)
+                end = min(e + pad_after, start + max_sec)
+                chosen.append(seg)
+            else:
+                if s - float(end) > 1.8 and (float(end) - float(start)) >= min_sec:
+                    break
+                end = min(max(float(end), e + pad_after), float(start) + max_sec)
+                chosen.append(seg)
+            if start is not None and (float(end) - float(start)) >= target_sec and len(chosen) >= 2:
+                break
+
+        if start is None or end is None or (float(end) - float(start)) < 1.2:
+            return None, ''
+
+        ref_path = job_dir / f'{engine_key}_auto_ref.wav'
+        run_cmd([
+            'ffmpeg', '-y', '-ss', f'{float(start):.3f}', '-to', f'{float(end):.3f}', '-i', str(audio_wav),
+            '-vn', '-ac', '1', '-ar', '24000',
+            '-af', 'highpass=f=70,lowpass=f=7600,dynaudnorm=f=150:g=9',
+            '-c:a', 'pcm_s16le', str(ref_path)
+        ], timeout=180)
+        if not ref_path.exists() or ref_path.stat().st_size < 2048:
+            return None, ''
+
+        ref_text = clean_text(' '.join(clean_text(seg.get('text', '')) for seg in chosen))
+        job['autoClone'] = True
+        job['autoCloneEngine'] = engine_key
+        job['autoCloneMode'] = 'per-job-from-current-video'
+        job['autoCloneRef'] = str(ref_path)
+        job['autoCloneRefText'] = ref_text[:1000]
+        job['autoCloneSpan'] = {'start': round(float(start), 3), 'end': round(float(end), 3), 'duration': round(float(end) - float(start), 3)}
+        job['autoCloneSegments'] = len(chosen)
+        return ref_path, ref_text
+    except Exception as e:
+        job['autoClone'] = False
+        job['autoCloneError'] = str(e)
+        print(f'[OCD] {engine} auto clone ref failed:', repr(e))
+        return None, ''
+
+
+def file_to_base64(path: Path) -> str:
+    return base64.b64encode(Path(path).read_bytes()).decode('ascii')
+
+
+def _write_fish_http_response_to_audio(response: requests.Response, out_path: Path):
+    content_type = str(response.headers.get('content-type', '')).lower()
+    if 'application/json' in content_type:
+        data = response.json()
+        audio_b64 = (
+            data.get('audioBase64') or data.get('audio_base64') or data.get('audio') or
+            data.get('wavBase64') or data.get('wav_base64') or data.get('data')
+        )
+        if isinstance(audio_b64, dict):
+            audio_b64 = audio_b64.get('base64') or audio_b64.get('audio')
+        if not audio_b64:
+            raise RuntimeError(f'Fish Speech JSON response does not contain audio. keys={list(data.keys())}')
+        audio_b64 = str(audio_b64)
+        if ',' in audio_b64 and audio_b64.strip().lower().startswith('data:'):
+            audio_b64 = audio_b64.split(',', 1)[1]
+        out_path.write_bytes(base64.b64decode(audio_b64))
+    else:
+        out_path.write_bytes(response.content)
+
+
+def fish_speech_tts_save(text: str, voice_role: str, target_lang: str, out_path: Path, target_duration: Optional[float] = None, auto_ref_audio: Optional[str] = None, ref_text: str = '') -> Dict[str, Any]:
+    """Generate one Pro chunk with Fish Speech.
+
+    Supports two deployment styles:
+    1) OCD_FISH_SPEECH_COMMAND with placeholders {text_file}, {ref_audio}, {output}, {lang}
+    2) OCD_FISH_SPEECH_API_URL, default http://127.0.0.1:8080/v1/tts
+
+    This keeps the main One Click Dub worker independent from Fish Speech internals and avoids
+    importing Fish Speech for Fast/Quality endpoints.
+    """
+    clean = clean_tts_text(text)
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    ref_audio = str(auto_ref_audio or '').strip()
+    if env_bool('OCD_FISH_SPEECH_AUTO_CLONE', '1') and not ref_audio:
+        raise RuntimeError('Fish Speech Pro requires an auto-clone reference audio. Check OCD_FISH_SPEECH_AUTO_CLONE and ref extraction logs.')
+
+    cmd_template = os.environ.get('OCD_FISH_SPEECH_COMMAND', '').strip()
+    if cmd_template:
+        text_file = out_path.with_suffix('.txt')
+        text_file.write_text(clean, encoding='utf-8')
+        cmd = cmd_template.format(
+            text=clean.replace('"', '\\"'),
+            text_file=str(text_file),
+            ref_audio=ref_audio,
+            reference_audio=ref_audio,
+            ref_text=(ref_text or '').replace('"', '\\"'),
+            output=str(out_path),
+            lang=lang_short(target_lang, 'ar'),
+            model=os.environ.get('OCD_FISH_SPEECH_MODEL', 'fishaudio/openaudio-s1-mini'),
+        )
+        p = subprocess.run(cmd, shell=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=int(os.environ.get('OCD_FISH_SPEECH_TIMEOUT', '420')))
+        if p.returncode != 0:
+            raise RuntimeError(f'Fish Speech command failed ({p.returncode}): {p.stdout[-3000:]}')
+        if not out_path.exists() or out_path.stat().st_size < 1024:
+            raise RuntimeError(f'Fish Speech command did not create output audio: {out_path}')
+        return {'engine': 'fish-speech-command', 'model': os.environ.get('OCD_FISH_SPEECH_MODEL', 'fishaudio/openaudio-s1-mini'), 'voice': voice_role, 'autoRef': bool(ref_audio)}
+
+    api_url = os.environ.get('OCD_FISH_SPEECH_API_URL', 'http://127.0.0.1:8080/v1/tts').strip()
+    if not api_url:
+        raise RuntimeError('Fish Speech Pro needs OCD_FISH_SPEECH_API_URL or OCD_FISH_SPEECH_COMMAND')
+
+    payload: Dict[str, Any] = {
+        'text': clean,
+        'format': 'wav',
+        'streaming': False,
+        'normalize': True,
+        'language': lang_short(target_lang, 'ar'),
+        'model': os.environ.get('OCD_FISH_SPEECH_MODEL', 'fishaudio/openaudio-s1-mini'),
+        'reference_text': ref_text or '',
+    }
+    if ref_audio:
+        ref_b64 = file_to_base64(Path(ref_audio))
+        # Several Fish/compatible APIs use different names. Send the common ones; strict servers
+        # usually ignore unknown fields, while custom adapters can read whichever they expect.
+        payload['reference_audio'] = ref_b64
+        payload['reference_audio_base64'] = ref_b64
+        payload['audio_prompt'] = ref_b64
+
+    headers = {'Content-Type': 'application/json'}
+    token = os.environ.get('FISH_AUDIO_API_KEY') or os.environ.get('OCD_FISH_SPEECH_API_KEY')
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+
+    r = requests.post(api_url, json=payload, headers=headers, timeout=int(os.environ.get('OCD_FISH_SPEECH_TIMEOUT', '420')))
+    if r.status_code >= 400:
+        raise RuntimeError(f'Fish Speech API failed {r.status_code}: {r.text[:1500]}')
+    _write_fish_http_response_to_audio(r, out_path)
+    if not out_path.exists() or out_path.stat().st_size < 1024:
+        raise RuntimeError(f'Fish Speech API returned empty audio: {out_path}')
+    return {'engine': 'fish-speech-api', 'apiUrl': api_url, 'model': os.environ.get('OCD_FISH_SPEECH_MODEL', 'fishaudio/openaudio-s1-mini'), 'voice': voice_role, 'autoRef': bool(ref_audio)}
+
+
 def convert_tts_to_wav(mp3_path: Path, wav_path: Path, target_duration: float, volume: float = 1.0):
     raw_duration = ffprobe_duration(mp3_path)
     filters = ['aresample=24000']
@@ -1802,15 +2054,16 @@ def process_job_impl(job_id: str, req: DubRequest):
     start_ts = time.time()
     model = normalize_model(req)
     omnivoice_auto_ref_audio: Optional[Path] = None
+    fish_auto_ref_audio: Optional[Path] = None
+    fish_auto_ref_text: str = ''
 
     try:
         # Model behavior in this custom backend:
-        # Fast    = Google Translate + Edge TTS   + faster-whisper large-v3-turbo by default on RunPod
-        # Quality = NLLB-200         + OmniVoice  + faster-whisper large-v3
-        # Pro     = NLLB-200         + Fish-Speech S1-mini + Whisper turbo (SOON / UI preview only)
+        # Fast    = Google Translate + Edge TTS
+        # Quality = NLLB-200         + OmniVoice  + per-job auto clone
+        # Pro     = NLLB-200         + Fish Speech + per-job auto clone
         if model == 'pro':
-            job.update(status='soon', progress=100, message='✨ Pro / Fish-Speech S1-mini is coming soon. This option is UI preview only; no backend model is installed yet.')
-            return
+            req.whisperModel = os.environ.get('OCD_PRO_WHISPER_MODEL', os.environ.get('OCD_QUALITY_WHISPER_MODEL', 'large-v3'))
         elif model == 'quality':
             req.whisperModel = os.environ.get('OCD_QUALITY_WHISPER_MODEL', 'large-v3')
         else:
@@ -1904,11 +2157,19 @@ def process_job_impl(job_id: str, req: DubRequest):
 
         if model == 'quality' and env_bool('OCD_OMNIVOICE_AUTO_CLONE', '1'):
             job.update(status='voice-clone', progress=31, message='Preparing per-job OmniVoice voice sample from this video')
-            omnivoice_auto_ref_audio = create_omnivoice_auto_ref_audio(audio_wav, raw_segments, job_dir, job)
+            omnivoice_auto_ref_audio, _omnivoice_ref_text = create_auto_clone_ref_audio(audio_wav, raw_segments, job_dir, job, engine='omnivoice')
             if omnivoice_auto_ref_audio:
-                job['voiceClone'] = 'auto-per-job-from-current-video'
+                job['voiceClone'] = 'omnivoice-auto-per-job-from-current-video'
             else:
                 job['voiceClone'] = 'fallback-design-or-selected-role'
+
+        if model == 'pro' and env_bool('OCD_FISH_SPEECH_AUTO_CLONE', '1'):
+            job.update(status='voice-clone', progress=31, message='Preparing per-job Fish Speech voice sample from this video')
+            fish_auto_ref_audio, fish_auto_ref_text = create_auto_clone_ref_audio(audio_wav, raw_segments, job_dir, job, engine='fish_speech')
+            if fish_auto_ref_audio:
+                job['voiceClone'] = 'fish-speech-auto-per-job-from-current-video'
+            else:
+                job['voiceClone'] = 'missing-fish-reference'
 
         job.update(status='chunking', progress=35, message='Smart chunking subtitles for fewer TTS calls')
         chunks = smart_chunk_segments(raw_segments, model)
@@ -1962,6 +2223,16 @@ def process_job_impl(job_id: str, req: DubRequest):
             job['ttsChunksBeforeRefine'] = before_refine
             job['ttsChunksAfterRefine'] = len(chunks)
             write_srt(job_dir / 'omnivoice_refined_chunks.srt', chunks, 'ttsText')
+        elif model == 'pro':
+            before_refine = len(chunks)
+            fish_max_chars = int(os.environ.get('OCD_FISH_SPEECH_TTS_MAX_CHARS', '320'))
+            expanded = []
+            for _chunk in chunks:
+                expanded.extend(split_chunk_by_tts_text(_chunk, 'ttsText', max_chars=fish_max_chars))
+            chunks = expanded
+            job['ttsChunksBeforeRefine'] = before_refine
+            job['ttsChunksAfterRefine'] = len(chunks)
+            write_srt(job_dir / 'fish_speech_refined_chunks.srt', chunks, 'ttsText')
 
         before_pause_chunks = len(chunks)
         chunks = apply_punctuation_pauses_to_chunks(chunks, 'ttsText')
@@ -1983,7 +2254,13 @@ def process_job_impl(job_id: str, req: DubRequest):
             voice_label = 'Auto Clone from this video' if omnivoice_auto_ref_audio else voice
             job.update(status='tts', progress=60, message=f'Generating OmniVoice Quality: {len(chunks)} chunks · {voice_label}')
         elif model == 'pro':
-            raise RuntimeError('Pro / Fish-Speech S1-mini is coming soon. UI preview only.')
+            tts_backend = 'fish-speech'
+            voice = str(req.voiceName or os.environ.get('OCD_FISH_SPEECH_VOICE', 'auto-clone-video')).strip() or 'auto-clone-video'
+            job['requestedVoiceName'] = voice
+            job['voiceName'] = 'auto-clone-from-video' if fish_auto_ref_audio else voice
+            job['ttsBackend'] = 'fish-speech'
+            voice_label = 'Auto Clone from this video' if fish_auto_ref_audio else voice
+            job.update(status='tts', progress=60, message=f'Generating Fish Speech Pro: {len(chunks)} chunks · {voice_label}')
         else:
             tts_backend = 'edge-tts'
             voice = edge_voice_for(target, req.voiceName)
@@ -1993,6 +2270,7 @@ def process_job_impl(job_id: str, req: DubRequest):
 
         wav_paths: List[Path] = []
         resolved_omnivoice_role = None
+        resolved_fish_role = None
         for i, c in enumerate(chunks, 1):
             wav_path = tts_dir / f'chunk_{i:04d}.wav'
             text = clean_tts_text(c.get('ttsText') or c.get('translatedText') or c.get('text') or '')
@@ -2002,7 +2280,13 @@ def process_job_impl(job_id: str, req: DubRequest):
                 # Quality/OmniVoice gets a small volume lift but less than clipping level.
                 convert_tts_to_wav(raw_path, wav_path, float(c['end']) - float(c['start']), volume=float(os.environ.get('OCD_OMNIVOICE_VOLUME', '1.06')))
             elif model == 'pro':
-                raise RuntimeError('Pro / Fish-Speech S1-mini is coming soon. UI preview only.')
+                raw_path = tts_dir / f'chunk_{i:04d}_fish_raw.wav'
+                resolved_fish_role = fish_speech_tts_save(
+                    text, voice, target, raw_path, float(c['end']) - float(c['start']),
+                    auto_ref_audio=str(fish_auto_ref_audio) if fish_auto_ref_audio else None,
+                    ref_text=fish_auto_ref_text,
+                )
+                convert_tts_to_wav(raw_path, wav_path, float(c['end']) - float(c['start']), volume=float(os.environ.get('OCD_FISH_SPEECH_VOLUME', '1.0')))
             else:
                 mp3_path = tts_dir / f'chunk_{i:04d}.mp3'
                 asyncio.run(edge_tts_save(text, voice, mp3_path))
@@ -2012,6 +2296,8 @@ def process_job_impl(job_id: str, req: DubRequest):
                 job.update(progress=min(86, 60 + int(i / max(1, len(chunks)) * 26)), message=f'Generating {tts_backend} {i}/{len(chunks)}')
         if resolved_omnivoice_role:
             job['omnivoiceResolvedRole'] = resolved_omnivoice_role
+        if resolved_fish_role:
+            job['fishSpeechResolvedRole'] = resolved_fish_role
 
         job.update(status='mixing', progress=88, message='Mixing dubbed audio on original timeline')
         dubbed_wav = job_dir / 'dubbed_timeline.wav'
@@ -2025,7 +2311,7 @@ def process_job_impl(job_id: str, req: DubRequest):
         final_path = OUTPUTS_DIR / final_name
         run_cmd([
             'ffmpeg', '-y', '-i', str(dubbed_wav),
-            '-vn', '-codec:a', 'libmp3lame', '-b:a', '192k', '-ar', '44100',
+            '-vn', '-codec:a', 'libmp3lame', '-b:a', os.environ.get('OCD_AUDIO_BITRATE', '256k' if model == 'pro' else '192k' if model == 'quality' else '128k'), '-ar', '44100',
             str(final_path)
         ], timeout=600)
 
@@ -2115,7 +2401,7 @@ def health():
             'maxFastJobs': os.environ.get('OCD_MAX_FAST_JOBS', os.environ.get('OCD_MAX_GPU_JOBS', '1')),
         },
         'publicBaseUrl': public_base_url(),
-        'pipeline': ['yt-dlp-audio-first+remote-ejs', 'ffmpeg', 'faster-whisper/OpenAI Whisper', 'smart-chunking', 'punctuation-restoration', 'google/nllb-200 translation', 'catt-tashkeel-optional', 'edge-tts/omnivoice/fish-speech-s1-mini-soon', 'per-job-auto-voice-clone', 'mp3-audio-overlay'],
+        'pipeline': ['yt-dlp-audio-first+remote-ejs', 'ffmpeg', 'faster-whisper/OpenAI Whisper', 'smart-chunking', 'punctuation-restoration', 'google/nllb-200 translation', 'safe-catt-tashkeel-preserve-symbols', 'edge-tts/omnivoice/fish-speech', 'per-job-auto-voice-clone', 'mp3-audio-overlay'],
         'ytdlpFix': {
             'enabled': True,
             'format': os.environ.get('OCD_YTDLP_FORMAT', 'ba[ext=m4a]/bestaudio[ext=m4a]/bestaudio/best'),
@@ -2156,8 +2442,10 @@ def health():
             'pro': {
                 'translation': 'nllb200',
                 'whisper': os.environ.get('OCD_PRO_WHISPER_MODEL', 'large-v3'),
-                'tts': 'fish-speech-s1-mini',
-                'status': 'soon-ui-preview-only',
+                'tts': 'fish-speech',
+                'status': 'enabled-if-OCD_FISH_SPEECH_API_URL-or-OCD_FISH_SPEECH_COMMAND-is-configured',
+                'autoClonePerJob': os.environ.get('OCD_FISH_SPEECH_AUTO_CLONE', '1'),
+                'model': os.environ.get('OCD_FISH_SPEECH_MODEL', 'fishaudio/openaudio-s1-mini'),
             },
         },
     }
