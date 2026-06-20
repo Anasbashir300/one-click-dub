@@ -425,6 +425,45 @@ def _read_audio_base64(path: str) -> Dict[str, Any]:
     }
 
 
+
+def _read_caption_chunks(path: str, limit: int = 500) -> list[dict]:
+    """Read translated timeline chunks for the browser Caption floating button.
+
+    This keeps the RunPod response useful for live captions without exposing temp paths.
+    """
+    try:
+        p = Path(path or "")
+        if not p.exists() or not p.is_file():
+            return []
+        data = json.loads(p.read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            return []
+        out = []
+        for i, c in enumerate(data[:limit]):
+            if not isinstance(c, dict):
+                continue
+            start = float(c.get("start") or 0.0)
+            end = float(c.get("end") or start + 2.0)
+            text = str(
+                c.get("ttsText") or
+                c.get("translatedText") or
+                c.get("translation") or
+                c.get("text") or
+                ""
+            ).strip()
+            if not text:
+                continue
+            out.append({
+                "index": i,
+                "start": round(start, 3),
+                "end": round(max(end, start + 0.25), 3),
+                "text": text,
+            })
+        return out
+    except Exception as exc:
+        print("[OCD] could not read caption chunks:", repr(exc))
+        return []
+
 def handler(event: Dict[str, Any]) -> Dict[str, Any]:
     started = time.time()
     try:
@@ -476,6 +515,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             }
 
         audio = _read_audio_base64(job.get("outputFile", ""))
+        caption_chunks = _read_caption_chunks(job.get("chunksFile", ""))
         return {
             "ok": True,
             "jobId": job_id,
@@ -496,6 +536,8 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 "voiceClone": job.get("voiceClone"),
                 "rawSegments": job.get("rawSegments"),
                 "ttsChunks": job.get("ttsChunks"),
+                "captions": caption_chunks,
+                "captionCount": len(caption_chunks),
                 "outputKind": "audio",
             },
         }

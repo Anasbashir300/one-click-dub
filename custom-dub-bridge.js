@@ -7,6 +7,12 @@
   let box = null;
   let polling = false;
   let overlay = null;
+  let floatingDock = null;
+  let dockExpanded = false;
+  let captionVisible = false;
+  let captionBox = null;
+  let captionTimer = null;
+  let lastDubResult = null;
 
   function getVideo() {
     const videos = [...document.querySelectorAll('video')].filter(v => {
@@ -53,22 +59,160 @@
   }
 
   function ensureUi() {
-    if (document.getElementById('ocd-pvt-btn')) return;
-    const btn = document.createElement('button');
-    btn.id = 'ocd-pvt-btn';
-    btn.textContent = '🎬 Dub';
-    btn.title = 'Dub this public video/page with the custom AI backend on RunPod';
-    btn.style.cssText = `
-      position:fixed; right:18px; top:46%; z-index:2147483647;
-      border:0; border-radius:16px; padding:12px 14px;
-      background:#111827; color:white; font-weight:800; cursor:pointer;
-      box-shadow:0 10px 30px rgba(0,0,0,.25); font-family:Arial,sans-serif;
+    if (document.getElementById('ocd-pvt-dock')) {
+      updateFloatingDock();
+      return;
+    }
+
+    injectFloatingDockCss();
+
+    floatingDock = document.createElement('div');
+    floatingDock.id = 'ocd-pvt-dock';
+    floatingDock.innerHTML = `
+      <button id="ocd-pvt-btn" class="ocd-pvt-main" type="button" title="Start One Click Dub">
+        <span class="ocd-pvt-dot"></span>
+        <span class="ocd-pvt-label">DUB</span>
+      </button>
+      <div id="ocd-pvt-actions" class="ocd-pvt-actions" aria-hidden="true">
+        <button id="ocd-pvt-caption-btn" class="ocd-pvt-action" type="button" title="Show / hide captions">
+          <span>CC</span>
+          <small>Caption</small>
+        </button>
+        <button id="ocd-pvt-download-btn" class="ocd-pvt-action disabled" type="button" title="Download dubbed audio after it is ready">
+          <span>⬇</span>
+          <small>Download</small>
+        </button>
+      </div>
     `;
-    btn.addEventListener('click', startJob);
-    document.documentElement.appendChild(btn);
+    document.documentElement.appendChild(floatingDock);
+
+    floatingDock.querySelector('#ocd-pvt-btn')?.addEventListener('click', async () => {
+      dockExpanded = true;
+      updateFloatingDock();
+
+      if (overlay) {
+        stopOverlayAudio(true);
+        return;
+      }
+
+      if (!polling) {
+        await startJob();
+      }
+    });
+
+    floatingDock.querySelector('#ocd-pvt-caption-btn')?.addEventListener('click', () => {
+      toggleCustomCaptions();
+    });
+
+    floatingDock.querySelector('#ocd-pvt-download-btn')?.addEventListener('click', () => {
+      downloadLastDubAudio();
+    });
+
+    updateFloatingDock();
   }
 
+  function injectFloatingDockCss() {
+    if (document.getElementById('ocd-pvt-dock-css')) return;
+    const style = document.createElement('style');
+    style.id = 'ocd-pvt-dock-css';
+    style.textContent = `
+      #ocd-pvt-dock, #ocd-pvt-dock * { box-sizing: border-box; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
+      #ocd-pvt-dock {
+        position: fixed;
+        right: 18px;
+        top: 46%;
+        transform: translateY(-50%);
+        z-index: 2147483647;
+        display: grid;
+        gap: 10px;
+        justify-items: end;
+        direction: ltr;
+        pointer-events: auto;
+      }
+      #ocd-pvt-dock button { cursor: pointer; user-select: none; }
+      #ocd-pvt-dock .ocd-pvt-main {
+        min-width: 68px;
+        height: 46px;
+        border: 1px solid rgba(34, 211, 238, .48);
+        border-radius: 17px;
+        color: #ecfeff;
+        background: linear-gradient(135deg, rgba(8, 14, 30, .96), rgba(22, 18, 48, .96));
+        box-shadow: 0 16px 45px rgba(0,0,0,.42), 0 0 28px rgba(34,211,238,.16);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 0 13px;
+        font-weight: 950;
+        letter-spacing: .08em;
+        transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease;
+        backdrop-filter: blur(12px);
+      }
+      #ocd-pvt-dock .ocd-pvt-main:hover { transform: translateX(-2px) scale(1.03); box-shadow: 0 20px 55px rgba(0,0,0,.52), 0 0 34px rgba(34,211,238,.26); }
+      #ocd-pvt-dock .ocd-pvt-dot { width: 8px; height: 8px; border-radius: 999px; background: #22d3ee; box-shadow: 0 0 14px rgba(34,211,238,.85); }
+      #ocd-pvt-dock .ocd-pvt-actions {
+        display: grid;
+        gap: 9px;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateX(12px) scale(.96);
+        transition: opacity .18s ease, transform .18s ease;
+      }
+      #ocd-pvt-dock.open .ocd-pvt-actions { opacity: 1; pointer-events: auto; transform: translateX(0) scale(1); }
+      #ocd-pvt-dock .ocd-pvt-action {
+        width: 78px;
+        min-height: 52px;
+        border: 1px solid rgba(255,255,255,.13);
+        border-radius: 16px;
+        color: #ffffff;
+        background: linear-gradient(180deg, rgba(18, 24, 42, .94), rgba(9, 11, 22, .94));
+        box-shadow: 0 14px 36px rgba(0,0,0,.38);
+        display: grid;
+        place-items: center;
+        gap: 2px;
+        padding: 7px 8px;
+        font-weight: 900;
+        transition: transform .18s ease, opacity .18s ease, border-color .18s ease, background .18s ease;
+        backdrop-filter: blur(12px);
+      }
+      #ocd-pvt-dock .ocd-pvt-action span { font-size: 16px; line-height: 1; }
+      #ocd-pvt-dock .ocd-pvt-action small { font-size: 10px; font-weight: 900; letter-spacing: .02em; opacity: .86; }
+      #ocd-pvt-dock .ocd-pvt-action:hover { transform: translateX(-2px) scale(1.035); border-color: rgba(34,211,238,.55); }
+      #ocd-pvt-dock .ocd-pvt-action.active { border-color: rgba(34,211,238,.75); background: linear-gradient(135deg, rgba(8, 145, 178, .95), rgba(37, 99, 235, .95)); }
+      #ocd-pvt-dock .ocd-pvt-action.ready { border-color: rgba(52, 211, 153, .82); background: linear-gradient(135deg, #059669, #34d399); color: #062216; box-shadow: 0 18px 45px rgba(16,185,129,.32); }
+      #ocd-pvt-dock .ocd-pvt-action.disabled { opacity: .45; filter: grayscale(.25); cursor: not-allowed; }
+      #ocd-pvt-dock.busy .ocd-pvt-main { border-color: rgba(168,85,247,.65); background: linear-gradient(135deg, rgba(88,28,135,.98), rgba(30,64,175,.98)); }
+      #ocd-pvt-dock.busy .ocd-pvt-dot { background: #a78bfa; box-shadow: 0 0 16px rgba(167,139,250,.95); animation: ocdPvtPulse 1s ease-in-out infinite; }
+      #ocd-pvt-dock.ready .ocd-pvt-main { border-color: rgba(52,211,153,.72); background: linear-gradient(135deg, rgba(6,95,70,.98), rgba(8,47,73,.98)); }
+      #ocd-pvt-dock.ready .ocd-pvt-dot { background: #34d399; box-shadow: 0 0 16px rgba(52,211,153,.95); }
+      #ocd-pvt-caption-box {
+        position: fixed;
+        left: 50%;
+        bottom: 13%;
+        transform: translateX(-50%);
+        z-index: 2147483646;
+        max-width: min(840px, 88vw);
+        padding: 12px 18px;
+        border-radius: 16px;
+        color: #fff;
+        background: rgba(0,0,0,.58);
+        border: 1px solid rgba(255,255,255,.16);
+        box-shadow: 0 18px 55px rgba(0,0,0,.45);
+        text-align: center;
+        font-size: clamp(18px, 2.2vw, 28px);
+        line-height: 1.35;
+        font-weight: 850;
+        text-shadow: 0 3px 10px rgba(0,0,0,.82);
+        backdrop-filter: blur(8px);
+        pointer-events: none;
+      }
+      #ocd-pvt-caption-box.hidden { display: none !important; }
+      @keyframes ocdPvtPulse { 0%,100%{ transform: scale(1); opacity: 1 } 50%{ transform: scale(1.45); opacity: .55 } }
+    `;
+    document.documentElement.appendChild(style);
+  }
   function show(message, progress = 0, actionsHtml = '') {
+    updateFloatingDock();
     if (!box) {
       box = document.createElement('div');
       box.id = 'ocd-pvt-status';
@@ -131,16 +275,15 @@
 
     const selectedModel = normalizeModelName(settings.modelName || 'fast');
     const targetLanguage = normalizeLang(settings.dubbingLanguage || 'ar');
-    if (selectedModel === 'pro') {
-      show('✨ Pro / Fish-Speech S1-mini is coming soon. Preview only — no backend job was started.', 100);
-      return;
-    }
+    const selectedVoice = selectedModel === 'fast'
+      ? normalizeVoice(settings.voiceName, settings.dubbingLanguage)
+      : normalizeReferenceVoice(settings.voiceName);
 
-    const selectedVoice = selectedModel === 'quality'
-      ? normalizeOmniVoiceRole(settings.voiceName)
-      : normalizeVoice(settings.voiceName, settings.dubbingLanguage);
-
-    const label = selectedModel === 'quality' ? 'Quality / OmniVoice' : 'Fast / OpenAI Whisper Large + Edge TTS';
+    const label = selectedModel === 'pro'
+      ? 'Pro / Fish Speech'
+      : selectedModel === 'quality'
+        ? 'Quality / OmniVoice'
+        : 'Fast / Edge TTS';
     show(`Sending page/video to custom RunPod backend · ${label}...`, 2);
     const res = await chrome.runtime.sendMessage({
       type: 'OCD_PVT_START_JOB',
@@ -153,9 +296,9 @@
         targetLanguage,
         voiceName: selectedVoice,
         modelName: selectedModel,
-        ttsType: selectedModel === 'quality' ? 2 : 0,
-        whisperModel: selectedModel === 'quality' ? 'medium' : 'large',
-        translationEngine: selectedModel === 'quality' ? 'nllb200' : 'google',
+        ttsType: selectedModel === 'pro' ? 3 : selectedModel === 'quality' ? 2 : 0,
+        whisperModel: selectedModel === 'fast' ? 'small' : 'large-v3',
+        translationEngine: selectedModel === 'fast' ? 'google' : 'nllb200',
         cuda: true
       }
     });
@@ -171,20 +314,21 @@
     return 'fast';
   }
 
-  function normalizeOmniVoiceRole(voice) {
+  function normalizeReferenceVoice(voice) {
     const v = String(voice || '').trim();
 
     if (v === 'auto-clone-video' || v === 'auto-clone-from-video') return 'auto-clone-video';
 
-    // Voice clone samples saved on RunPod under OCD_OMNIVOICE_REFS_DIR.
-    // Keep these values exactly as filenames so the backend can locate them.
-    if (/^sample_0[1-5]\.(wav|mp3|m4a|flac|ogg)$/i.test(v)) return v;
-
-    const allowed = new Set([
-      'design-male-deep-ar','design-male-warm-ar','design-female-soft-ar',
-      'design-female-bright-ar','design-narrator-ar','nverguo.wav'
+    // Ready reference samples saved on RunPod under /runpod-volume/one-click-dub/ready_voice_refs.
+    const ready = new Set([
+      'auto-clone-video',
+      'ocd-orion-male',
+      'ocd-salem-male',
+      'ocd-lina-female',
+      'ocd-noura-female'
     ]);
-    return allowed.has(v) ? v : 'design-male-deep-ar';
+    const key = v.toLowerCase();
+    return ready.has(key) ? key : 'auto-clone-video';
   }
 
   function normalizeLang(code) {
@@ -212,6 +356,8 @@
 
   async function pollJob(jobId) {
     polling = true;
+    dockExpanded = true;
+    updateFloatingDock();
     try {
       while (true) {
         const res = await chrome.runtime.sendMessage({ type: 'OCD_PVT_JOB_STATUS', jobId });
@@ -228,7 +374,7 @@
             show('Done, but the backend did not return audioUrl. Upload the fixed server file again.', 100);
             break;
           }
-          await attachDubAudio(audioUrl);
+          await attachDubAudio(audioUrl, res);
           break;
         }
         if (res.status === 'soon') {
@@ -240,10 +386,11 @@
       }
     } finally {
       polling = false;
+      updateFloatingDock();
     }
   }
 
-  async function attachDubAudio(audioUrl) {
+  async function attachDubAudio(audioUrl, jobResult = {}) {
     const video = getVideo();
     if (!video) return show('Audio is ready, but the page video element was not found.', 100);
 
@@ -261,6 +408,16 @@
         100
       );
     }
+
+    const captions = extractCaptionsFromJobResult(jobResult);
+    const filename = buildDubFilename(jobResult);
+    lastDubResult = {
+      audioUrl,
+      filename,
+      captions,
+      meta: jobResult?.meta || {},
+      completedAt: Date.now()
+    };
 
     overlay = {
       audio,
@@ -292,6 +449,9 @@
 
     syncNow(true);
     if (!video.paused) await playSynced();
+
+    dockExpanded = true;
+    updateFloatingDock();
 
     show(
       'Dubbed audio is now playing over the current page video. Original video audio is muted.',
@@ -451,8 +611,180 @@
       video.volume = oldVolume;
     }
     overlay = null;
+    stopCustomCaptions(false);
     if (showMessage) show('Dubbed audio stopped. Original video audio restored.', 100);
+    updateFloatingDock();
   }
+
+
+
+  function updateFloatingDock() {
+    const dock = document.getElementById('ocd-pvt-dock');
+    if (!dock) return;
+    const main = dock.querySelector('#ocd-pvt-btn');
+    const actions = dock.querySelector('#ocd-pvt-actions');
+    const captionBtn = dock.querySelector('#ocd-pvt-caption-btn');
+    const downloadBtn = dock.querySelector('#ocd-pvt-download-btn');
+
+    dock.classList.toggle('open', dockExpanded || polling || !!overlay || !!lastDubResult);
+    dock.classList.toggle('busy', polling);
+    dock.classList.toggle('ready', !!lastDubResult && !polling);
+    if (actions) actions.setAttribute('aria-hidden', dock.classList.contains('open') ? 'false' : 'true');
+
+    if (main) {
+      main.title = overlay ? 'Stop dubbed audio' : polling ? 'Dubbing is processing' : 'Start dubbing this video';
+      const label = main.querySelector('.ocd-pvt-label');
+      if (label) label.textContent = overlay ? 'STOP' : polling ? 'DUB…' : 'DUB';
+    }
+
+    if (captionBtn) {
+      captionBtn.classList.toggle('active', !!captionVisible);
+      const hasCaption = !!(lastDubResult?.captions?.length);
+      captionBtn.title = hasCaption ? 'Show / hide translated captions' : 'Captions will be available if the backend returns segment text';
+    }
+
+    if (downloadBtn) {
+      const ready = !!lastDubResult?.audioUrl;
+      downloadBtn.classList.toggle('ready', ready);
+      downloadBtn.classList.toggle('disabled', !ready);
+      downloadBtn.title = ready ? 'Download dubbed audio' : 'Download will unlock when dubbing is complete';
+    }
+  }
+
+  function extractCaptionsFromJobResult(result = {}) {
+    const meta = result?.meta || {};
+    const candidates = [
+      result.captions,
+      result.segments,
+      result.chunks,
+      meta.captions,
+      meta.segments,
+      meta.chunks,
+      meta.ttsChunks,
+      meta.rawSegments,
+      meta.translatedChunks,
+      meta.timeline,
+    ];
+
+    for (const arr of candidates) {
+      if (!Array.isArray(arr) || !arr.length) continue;
+      const captions = arr.map((item, index) => {
+        const start = Number(item.start ?? item.from ?? item.begin ?? item.t0 ?? 0);
+        const end = Number(item.end ?? item.to ?? item.finish ?? item.t1 ?? (start + 3));
+        const text = String(
+          item.ttsText ||
+          item.translatedText ||
+          item.translation ||
+          item.displayText ||
+          item.text ||
+          item.caption ||
+          ''
+        ).trim();
+        return { index, start, end: Math.max(end, start + 0.25), text };
+      }).filter(c => c.text && Number.isFinite(c.start) && Number.isFinite(c.end));
+      if (captions.length) return captions;
+    }
+    return [];
+  }
+
+  function toggleCustomCaptions() {
+    dockExpanded = true;
+    if (!lastDubResult?.captions?.length) {
+      show('Captions are not available yet. They will appear if the backend returns translated timeline segments with the completed dub.', 100);
+      updateFloatingDock();
+      return;
+    }
+    captionVisible = !captionVisible;
+    if (captionVisible) startCustomCaptions();
+    else stopCustomCaptions(false);
+    updateFloatingDock();
+  }
+
+  function startCustomCaptions() {
+    if (!captionBox) {
+      captionBox = document.createElement('div');
+      captionBox.id = 'ocd-pvt-caption-box';
+      document.documentElement.appendChild(captionBox);
+    }
+    captionBox.classList.remove('hidden');
+    if (captionTimer) clearInterval(captionTimer);
+    captionTimer = setInterval(renderCustomCaption, 160);
+    renderCustomCaption();
+  }
+
+  function stopCustomCaptions(hide = true) {
+    if (captionTimer) clearInterval(captionTimer);
+    captionTimer = null;
+    if (hide && captionBox) captionBox.classList.add('hidden');
+    captionVisible = false;
+    updateFloatingDock();
+  }
+
+  function renderCustomCaption() {
+    if (!captionVisible || !captionBox || !lastDubResult?.captions?.length) return;
+    const video = overlay?.video || getVideo();
+    const now = Number(video?.currentTime || 0);
+    const current = lastDubResult.captions.find(c => c.start <= now + 0.12 && c.end >= now - 0.12);
+    if (!current) {
+      captionBox.classList.add('hidden');
+      return;
+    }
+    captionBox.textContent = current.text;
+    captionBox.classList.remove('hidden');
+    positionCustomCaption(video);
+  }
+
+  function positionCustomCaption(video) {
+    if (!captionBox || !video) return;
+    try {
+      const r = video.getBoundingClientRect();
+      if (r.width > 120 && r.height > 80) {
+        captionBox.style.left = `${Math.round(r.left + r.width / 2)}px`;
+        captionBox.style.bottom = `${Math.max(16, Math.round(window.innerHeight - r.bottom + r.height * 0.10))}px`;
+        captionBox.style.maxWidth = `${Math.max(280, Math.round(r.width * 0.86))}px`;
+      }
+    } catch {}
+  }
+
+  function buildDubFilename(result = {}) {
+    const model = String(result.model || result.meta?.modelName || 'dub').replace(/[^a-z0-9_-]+/gi, '-').toLowerCase();
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    return `one-click-dub-${model}-${stamp}.mp3`;
+  }
+
+  async function downloadLastDubAudio() {
+    if (!lastDubResult?.audioUrl) {
+      show('Download will be available after the dubbing is complete.', 100);
+      updateFloatingDock();
+      return;
+    }
+    try {
+      const a = document.createElement('a');
+      a.href = lastDubResult.audioUrl;
+      a.download = lastDubResult.filename || 'one-click-dub-audio.mp3';
+      a.style.display = 'none';
+      document.documentElement.appendChild(a);
+      a.click();
+      a.remove();
+      show('Downloading dubbed audio...', 100);
+    } catch (error) {
+      show(`Could not download audio: ${error?.message || error}`, 100);
+    }
+  }
+
+  chrome.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
+    if (message?.type === 'OCD_START_CUSTOM_DUB') {
+      startJob()
+        .then(() => sendResponse({ ok: true }))
+        .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+      return true;
+    }
+    if (message?.type === 'OCD_STOP_CUSTOM_DUB') {
+      stopOverlayAudio(true);
+      sendResponse({ ok: true });
+      return true;
+    }
+  });
 
   ensureUi();
   let last = location.href;
