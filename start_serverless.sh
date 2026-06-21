@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-mkdir -p "${OCD_ROOT:-/runpod-volume/one-click-dub}" \
+mkdir -p "${OCD_ROOT:-/runpod-volume/one-click-dub}"
+# Copy bundled ready voice reference WAVs from the image into the persistent RunPod volume.
+mkdir -p /runpod-volume/one-click-dub/ready_voice_refs
+if [ -d "/app/ready_voice_refs" ]; then
+  cp -n /app/ready_voice_refs/* /runpod-volume/one-click-dub/ready_voice_refs/ 2>/dev/null || true
+fi
+export OCD_READY_VOICE_REFS_DIR="${OCD_READY_VOICE_REFS_DIR:-/runpod-volume/one-click-dub/ready_voice_refs}"
+echo "[OCD] Ready voice refs:"
+ls -lh "$OCD_READY_VOICE_REFS_DIR" 2>/dev/null || true
+ \
          "${OCD_JOBS_DIR:-/runpod-volume/one-click-dub/jobs}" \
          "${OCD_OUTPUTS_DIR:-/runpod-volume/one-click-dub/outputs}" \
          "${HF_HOME:-/runpod-volume/.cache/huggingface}" \
