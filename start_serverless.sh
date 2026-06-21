@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-mkdir -p "${OCD_ROOT:-/runpod-volume/one-click-dub}"
+# One Click Dub Pro — RunPod Serverless startup
+# Fixes exit code 127 caused by a broken multiline mkdir command.
+
+mkdir -p \
+  "${OCD_ROOT:-/runpod-volume/one-click-dub}" \
+  "${OCD_JOBS_DIR:-/runpod-volume/one-click-dub/jobs}" \
+  "${OCD_OUTPUTS_DIR:-/runpod-volume/one-click-dub/outputs}" \
+  "${HF_HOME:-/runpod-volume/.cache/huggingface}" \
+  "$(dirname "${OCD_FISH_CHECKPOINT_DIR:-/runpod-volume/fish-speech/checkpoints/openaudio-s1-mini}")"
+
 # Copy bundled ready voice reference WAVs from the image into the persistent RunPod volume.
 mkdir -p /runpod-volume/one-click-dub/ready_voice_refs
 if [ -d "/app/ready_voice_refs" ]; then
@@ -10,11 +19,6 @@ fi
 export OCD_READY_VOICE_REFS_DIR="${OCD_READY_VOICE_REFS_DIR:-/runpod-volume/one-click-dub/ready_voice_refs}"
 echo "[OCD] Ready voice refs:"
 ls -lh "$OCD_READY_VOICE_REFS_DIR" 2>/dev/null || true
- \
-         "${OCD_JOBS_DIR:-/runpod-volume/one-click-dub/jobs}" \
-         "${OCD_OUTPUTS_DIR:-/runpod-volume/one-click-dub/outputs}" \
-         "${HF_HOME:-/runpod-volume/.cache/huggingface}" \
-         "$(dirname "${OCD_FISH_CHECKPOINT_DIR:-/runpod-volume/fish-speech/checkpoints/openaudio-s1-mini}")"
 
 MODEL_NAME="${OCD_MODEL:-${OCD_ENDPOINT_MODEL:-fast}}"
 TTS_ENGINE="${OCD_TTS_ENGINE:-}"
@@ -35,6 +39,25 @@ if [[ "$should_start_fish" == "1" ]]; then
   export OCD_FISH_SPEECH_MODEL="${OCD_FISH_SPEECH_MODEL:-fishaudio/openaudio-s1-mini}"
   export OCD_FISH_CHECKPOINT_DIR="${OCD_FISH_CHECKPOINT_DIR:-/runpod-volume/fish-speech/checkpoints/openaudio-s1-mini}"
   export OCD_FISH_API_LISTEN="${OCD_FISH_API_LISTEN:-127.0.0.1:8080}"
+
+  echo "=== OCD PRO DIAG ==="
+  which python || true
+  python --version || true
+  python - <<'PY'
+import sys
+print("Python:", sys.version)
+try:
+    import torch
+    print("Torch:", torch.__version__, "CUDA:", torch.cuda.is_available())
+except Exception as e:
+    print("Torch import failed:", repr(e))
+try:
+    import fish_speech
+    print("fish_speech import OK")
+except Exception as e:
+    print("fish_speech import FAILED:", repr(e))
+PY
+  echo "=== END OCD PRO DIAG ==="
 
   if [[ ! -f "${OCD_FISH_CHECKPOINT_DIR}/codec.pth" ]]; then
     echo "[OCD] Fish Speech checkpoint not found. Downloading ${OCD_FISH_SPEECH_MODEL} to ${OCD_FISH_CHECKPOINT_DIR} ..."
@@ -68,18 +91,24 @@ PY
   cd /app
 
   echo "[OCD] Waiting for Fish Speech API..."
+  fish_ready=0
   for i in $(seq 1 120); do
     if curl -fsS "http://127.0.0.1:8080/docs" >/dev/null 2>&1 || curl -fsS "http://127.0.0.1:8080/" >/dev/null 2>&1; then
       echo "[OCD] Fish Speech API is ready."
+      fish_ready=1
       break
     fi
     if ! kill -0 "$fish_pid" >/dev/null 2>&1; then
-      echo "[OCD] Fish Speech API process exited early."
+      echo "[OCD] Fish Speech API process exited early. Last error should be above."
       wait "$fish_pid" || true
       exit 1
     fi
     sleep 2
   done
+  if [[ "$fish_ready" != "1" ]]; then
+    echo "[OCD] Fish Speech API did not become ready after 240s."
+    exit 1
+  fi
 fi
 
 cd /app
