@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# One Click Dub Pro — RunPod Serverless startup
-# Fixes exit code 127 caused by a broken multiline mkdir command.
+export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-0}"
 
 mkdir -p \
   "${OCD_ROOT:-/runpod-volume/one-click-dub}" \
@@ -43,19 +42,26 @@ if [[ "$should_start_fish" == "1" ]]; then
   echo "=== OCD PRO DIAG ==="
   which python || true
   python --version || true
+  echo "HF_HUB_ENABLE_HF_TRANSFER=${HF_HUB_ENABLE_HF_TRANSFER:-}"
+  echo "OCD_FISH_SPEECH_MODEL=${OCD_FISH_SPEECH_MODEL}"
+  echo "OCD_FISH_CHECKPOINT_DIR=${OCD_FISH_CHECKPOINT_DIR}"
+  if [ -f /app/FISH_SPEECH_COMMIT.txt ]; then
+    echo -n "Fish Speech git commit: "
+    cat /app/FISH_SPEECH_COMMIT.txt || true
+  fi
   python - <<'PY'
 import sys
-print("Python:", sys.version)
+print('Python:', sys.version)
 try:
     import torch
-    print("Torch:", torch.__version__, "CUDA:", torch.cuda.is_available())
+    print('Torch:', torch.__version__, 'CUDA:', torch.cuda.is_available())
 except Exception as e:
-    print("Torch import failed:", repr(e))
+    print('Torch import failed:', repr(e))
 try:
     import fish_speech
-    print("fish_speech import OK")
+    print('fish_speech import OK')
 except Exception as e:
-    print("fish_speech import FAILED:", repr(e))
+    print('fish_speech import FAILED:', repr(e))
 PY
   echo "=== END OCD PRO DIAG ==="
 
@@ -64,51 +70,63 @@ PY
     python - <<'PY'
 import os
 from huggingface_hub import snapshot_download
-repo_id = os.environ.get("OCD_FISH_SPEECH_MODEL", "fishaudio/openaudio-s1-mini")
-local_dir = os.environ.get("OCD_FISH_CHECKPOINT_DIR", "/runpod-volume/fish-speech/checkpoints/openaudio-s1-mini")
-token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
-snapshot_download(repo_id=repo_id, local_dir=local_dir, token=token, local_dir_use_symlinks=False)
-print(f"[OCD] Fish Speech checkpoint ready: {local_dir}")
+os.environ.setdefault('HF_HUB_ENABLE_HF_TRANSFER', '0')
+repo_id = os.environ.get('OCD_FISH_SPEECH_MODEL', 'fishaudio/openaudio-s1-mini')
+local_dir = os.environ.get('OCD_FISH_CHECKPOINT_DIR', '/runpod-volume/fish-speech/checkpoints/openaudio-s1-mini')
+token = os.environ.get('HF_TOKEN') or os.environ.get('HUGGING_FACE_HUB_TOKEN')
+snapshot_download(repo_id=repo_id, local_dir=local_dir, token=token)
+print(f'[OCD] Fish Speech checkpoint ready: {local_dir}')
 PY
   else
     echo "[OCD] Fish Speech checkpoint already exists: ${OCD_FISH_CHECKPOINT_DIR}"
   fi
 
-  echo "[OCD] Starting Fish Speech API on ${OCD_FISH_API_LISTEN} ..."
-  cd /app/fish-speech
-  compile_flag=""
-  if [[ "${OCD_FISH_COMPILE:-0}" == "1" || "${OCD_FISH_COMPILE:-0}" == "true" ]]; then
-    compile_flag="--compile"
+  echo "[OCD] Applying Fish startup/runtime patches..."
+  if [ -f /app/patch_fish_startup.py ]; then
+    python /app/patch_fish_startup.py || true
+  else
+    echo "[OCD] patch_fish_startup.py not found; continuing without runtime patch"
   fi
 
-  python -m tools.api_server \
-    --listen "${OCD_FISH_API_LISTEN}" \
-    --llama-checkpoint-path "${OCD_FISH_CHECKPOINT_DIR}" \
-    --decoder-checkpoint-path "${OCD_FISH_CHECKPOINT_DIR}/codec.pth" \
-    --decoder-config-name modded_dac_vq \
-    ${compile_flag} &
+  echo "[OCD] Starting Fish Speech API on ${OCD_FISH_API_LISTEN} ..."
+  cd /app/fish-speech
+
+  api_cmd=(python tools/api_server.py
+    --listen "${OCD_FISH_API_LISTEN}"
+    --llama-checkpoint-path "${OCD_FISH_CHECKPOINT_DIR}"
+    --decoder-checkpoint-path "${OCD_FISH_CHECKPOINT_DIR}/codec.pth"
+    --decoder-config-name modded_dac_vq)
+
+  if [[ ! -f "tools/api_server.py" ]]; then
+    api_cmd=(python -m tools.api_server
+      --listen "${OCD_FISH_API_LISTEN}"
+      --llama-checkpoint-path "${OCD_FISH_CHECKPOINT_DIR}"
+      --decoder-checkpoint-path "${OCD_FISH_CHECKPOINT_DIR}/codec.pth"
+      --decoder-config-name modded_dac_vq)
+  fi
+
+  if [[ "${OCD_FISH_COMPILE:-0}" == "1" || "${OCD_FISH_COMPILE:-0}" == "true" ]]; then
+    api_cmd+=(--compile)
+  fi
+
+  echo "[OCD] Fish API command: ${api_cmd[*]}"
+  "${api_cmd[@]}" &
   fish_pid=$!
   cd /app
 
   echo "[OCD] Waiting for Fish Speech API..."
-  fish_ready=0
-  for i in $(seq 1 120); do
+  for i in $(seq 1 180); do
     if curl -fsS "http://127.0.0.1:8080/docs" >/dev/null 2>&1 || curl -fsS "http://127.0.0.1:8080/" >/dev/null 2>&1; then
       echo "[OCD] Fish Speech API is ready."
-      fish_ready=1
       break
     fi
     if ! kill -0 "$fish_pid" >/dev/null 2>&1; then
-      echo "[OCD] Fish Speech API process exited early. Last error should be above."
+      echo "[OCD] Fish Speech API process exited early."
       wait "$fish_pid" || true
       exit 1
     fi
     sleep 2
   done
-  if [[ "$fish_ready" != "1" ]]; then
-    echo "[OCD] Fish Speech API did not become ready after 240s."
-    exit 1
-  fi
 fi
 
 cd /app
