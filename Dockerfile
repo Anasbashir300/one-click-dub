@@ -29,7 +29,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
 WORKDIR /app
 
 RUN apt-get update -y && apt-get install -y --no-install-recommends \
-    ffmpeg git git-lfs curl wget unzip ca-certificates nodejs npm libsndfile1 \
+    ffmpeg git git-lfs curl wget unzip ca-certificates nodejs npm \
+    build-essential python3-dev pkg-config \
+    libsndfile1 libsndfile1-dev \
+    portaudio19-dev libportaudio2 libportaudiocpp0 libasound2-dev \
     && git lfs install \
     && rm -rf /var/lib/apt/lists/*
 
