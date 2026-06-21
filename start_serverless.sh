@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-0}"
+# Quality endpoint patch:
+# - Force-disable hf_transfer at runtime even if the RunPod UI still has HF_HUB_ENABLE_HF_TRANSFER=1.
+# - Force Quality/OmniVoice mode and block Fish startup.
+# - Print a quick Higgs/Transformers diagnostic before starting the RunPod handler.
+export HF_HUB_ENABLE_HF_TRANSFER=0
+export OCD_ENDPOINT_MODEL="${OCD_ENDPOINT_MODEL:-quality}"
+export OCD_MODEL="${OCD_MODEL:-quality}"
+export OCD_TTS_ENGINE="${OCD_TTS_ENGINE:-omnivoice}"
+export OCD_TRANSLATION_ENGINE="${OCD_TRANSLATION_ENGINE:-nllb200}"
+export OCD_ENABLE_FISH_API=0
 
 mkdir -p \
   "${OCD_ROOT:-/runpod-volume/one-click-dub}" \
   "${OCD_JOBS_DIR:-/runpod-volume/one-click-dub/jobs}" \
   "${OCD_OUTPUTS_DIR:-/runpod-volume/one-click-dub/outputs}" \
   "${HF_HOME:-/runpod-volume/.cache/huggingface}" \
-  "$(dirname "${OCD_FISH_CHECKPOINT_DIR:-/runpod-volume/fish-speech/checkpoints/openaudio-s1-mini}")"
+  "${XDG_CACHE_HOME:-/runpod-volume/.cache}"
 
 # Copy bundled ready voice reference WAVs from the image into the persistent RunPod volume.
 mkdir -p /runpod-volume/one-click-dub/ready_voice_refs
@@ -16,40 +25,16 @@ if [ -d "/app/ready_voice_refs" ]; then
   cp -n /app/ready_voice_refs/* /runpod-volume/one-click-dub/ready_voice_refs/ 2>/dev/null || true
 fi
 export OCD_READY_VOICE_REFS_DIR="${OCD_READY_VOICE_REFS_DIR:-/runpod-volume/one-click-dub/ready_voice_refs}"
-echo "[OCD] Ready voice refs:"
+echo "[OCD QUALITY] Ready voice refs:"
 ls -lh "$OCD_READY_VOICE_REFS_DIR" 2>/dev/null || true
 
-MODEL_NAME="${OCD_MODEL:-${OCD_ENDPOINT_MODEL:-fast}}"
-TTS_ENGINE="${OCD_TTS_ENGINE:-}"
-FISH_ENABLED="${OCD_ENABLE_FISH_API:-auto}"
-
-should_start_fish=0
-if [[ "$FISH_ENABLED" == "1" || "$FISH_ENABLED" == "true" || "$FISH_ENABLED" == "yes" || "$FISH_ENABLED" == "on" ]]; then
-  should_start_fish=1
-elif [[ "$FISH_ENABLED" == "auto" ]]; then
-  if [[ "$MODEL_NAME" == "pro" || "$TTS_ENGINE" == "fish_speech" ]]; then
-    should_start_fish=1
-  fi
-fi
-
-if [[ "$should_start_fish" == "1" ]]; then
-  export OCD_TTS_ENGINE="fish_speech"
-  export OCD_FISH_SPEECH_API_URL="${OCD_FISH_SPEECH_API_URL:-http://127.0.0.1:8080/v1/tts}"
-  export OCD_FISH_SPEECH_MODEL="${OCD_FISH_SPEECH_MODEL:-fishaudio/openaudio-s1-mini}"
-  export OCD_FISH_CHECKPOINT_DIR="${OCD_FISH_CHECKPOINT_DIR:-/runpod-volume/fish-speech/checkpoints/openaudio-s1-mini}"
-  export OCD_FISH_API_LISTEN="${OCD_FISH_API_LISTEN:-127.0.0.1:8080}"
-
-  echo "=== OCD PRO DIAG ==="
-  which python || true
-  python --version || true
-  echo "HF_HUB_ENABLE_HF_TRANSFER=${HF_HUB_ENABLE_HF_TRANSFER:-}"
-  echo "OCD_FISH_SPEECH_MODEL=${OCD_FISH_SPEECH_MODEL}"
-  echo "OCD_FISH_CHECKPOINT_DIR=${OCD_FISH_CHECKPOINT_DIR}"
-  if [ -f /app/FISH_SPEECH_COMMIT.txt ]; then
-    echo -n "Fish Speech git commit: "
-    cat /app/FISH_SPEECH_COMMIT.txt || true
-  fi
-  python - <<'PY'
+echo "=== OCD QUALITY DIAG ==="
+which python || true
+python --version || true
+echo "HF_HUB_ENABLE_HF_TRANSFER=${HF_HUB_ENABLE_HF_TRANSFER}"
+echo "OCD_MODEL=${OCD_MODEL}"
+echo "OCD_TTS_ENGINE=${OCD_TTS_ENGINE}"
+python - <<'PY'
 import sys
 print('Python:', sys.version)
 try:
@@ -58,76 +43,29 @@ try:
 except Exception as e:
     print('Torch import failed:', repr(e))
 try:
-    import fish_speech
-    print('fish_speech import OK')
+    import transformers
+    print('Transformers:', transformers.__version__)
+    from transformers import HiggsAudioV2TokenizerModel
+    print('HiggsAudioV2TokenizerModel import OK')
 except Exception as e:
-    print('fish_speech import FAILED:', repr(e))
+    print('HiggsAudioV2TokenizerModel import FAILED:', repr(e))
+    raise
+try:
+    import omnivoice
+    print('OmniVoice import OK')
+except Exception as e:
+    print('OmniVoice import FAILED:', repr(e))
+    raise
 PY
-  echo "=== END OCD PRO DIAG ==="
-
-  if [[ ! -f "${OCD_FISH_CHECKPOINT_DIR}/codec.pth" ]]; then
-    echo "[OCD] Fish Speech checkpoint not found. Downloading ${OCD_FISH_SPEECH_MODEL} to ${OCD_FISH_CHECKPOINT_DIR} ..."
-    python - <<'PY'
-import os
-from huggingface_hub import snapshot_download
-os.environ.setdefault('HF_HUB_ENABLE_HF_TRANSFER', '0')
-repo_id = os.environ.get('OCD_FISH_SPEECH_MODEL', 'fishaudio/openaudio-s1-mini')
-local_dir = os.environ.get('OCD_FISH_CHECKPOINT_DIR', '/runpod-volume/fish-speech/checkpoints/openaudio-s1-mini')
-token = os.environ.get('HF_TOKEN') or os.environ.get('HUGGING_FACE_HUB_TOKEN')
-snapshot_download(repo_id=repo_id, local_dir=local_dir, token=token)
-print(f'[OCD] Fish Speech checkpoint ready: {local_dir}')
-PY
-  else
-    echo "[OCD] Fish Speech checkpoint already exists: ${OCD_FISH_CHECKPOINT_DIR}"
-  fi
-
-  echo "[OCD] Applying Fish startup/runtime patches..."
-  if [ -f /app/patch_fish_startup.py ]; then
-    python /app/patch_fish_startup.py || true
-  else
-    echo "[OCD] patch_fish_startup.py not found; continuing without runtime patch"
-  fi
-
-  echo "[OCD] Starting Fish Speech API on ${OCD_FISH_API_LISTEN} ..."
-  cd /app/fish-speech
-
-  api_cmd=(python tools/api_server.py
-    --listen "${OCD_FISH_API_LISTEN}"
-    --llama-checkpoint-path "${OCD_FISH_CHECKPOINT_DIR}"
-    --decoder-checkpoint-path "${OCD_FISH_CHECKPOINT_DIR}/codec.pth"
-    --decoder-config-name modded_dac_vq)
-
-  if [[ ! -f "tools/api_server.py" ]]; then
-    api_cmd=(python -m tools.api_server
-      --listen "${OCD_FISH_API_LISTEN}"
-      --llama-checkpoint-path "${OCD_FISH_CHECKPOINT_DIR}"
-      --decoder-checkpoint-path "${OCD_FISH_CHECKPOINT_DIR}/codec.pth"
-      --decoder-config-name modded_dac_vq)
-  fi
-
-  if [[ "${OCD_FISH_COMPILE:-0}" == "1" || "${OCD_FISH_COMPILE:-0}" == "true" ]]; then
-    api_cmd+=(--compile)
-  fi
-
-  echo "[OCD] Fish API command: ${api_cmd[*]}"
-  "${api_cmd[@]}" &
-  fish_pid=$!
-  cd /app
-
-  echo "[OCD] Waiting for Fish Speech API..."
-  for i in $(seq 1 180); do
-    if curl -fsS "http://127.0.0.1:8080/docs" >/dev/null 2>&1 || curl -fsS "http://127.0.0.1:8080/" >/dev/null 2>&1; then
-      echo "[OCD] Fish Speech API is ready."
-      break
-    fi
-    if ! kill -0 "$fish_pid" >/dev/null 2>&1; then
-      echo "[OCD] Fish Speech API process exited early."
-      wait "$fish_pid" || true
-      exit 1
-    fi
-    sleep 2
-  done
-fi
+echo "=== END OCD QUALITY DIAG ==="
 
 cd /app
-exec python -u handler.py
+if [ -f /app/handler.py ]; then
+  exec python -u /app/handler.py
+elif [ -f /app/serverless_handler.py ]; then
+  exec python -u /app/serverless_handler.py
+else
+  echo "[OCD QUALITY] No handler.py or serverless_handler.py found in /app"
+  ls -lah /app
+  exit 1
+fi

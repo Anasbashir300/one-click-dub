@@ -1,19 +1,58 @@
 # One Click Dub Quality endpoint - OmniVoice only, no Fish Speech.
 FROM runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
-ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
-    HF_HOME=/runpod-volume/.cache/huggingface TRANSFORMERS_CACHE=/runpod-volume/.cache/huggingface \
-    XDG_CACHE_HOME=/runpod-volume/.cache OCD_ROOT=/runpod-volume/one-click-dub \
-    OCD_RUNPOD_SERVERLESS=1 OCD_MODEL=quality OCD_TTS_ENGINE=omnivoice OCD_TRANSLATION_ENGINE=nllb200 \
-    OCD_OMNIVOICE_AUTO_CLONE=1 OCD_USE_CATT_TASHKEEL=1 OCD_SAFE_TASHKEEL=1 \
-    OCD_USE_PUNCTUATION=1 OCD_TTS_PUNCT_PAUSES=1
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/runpod-volume/.cache/huggingface \
+    TRANSFORMERS_CACHE=/runpod-volume/.cache/huggingface \
+    XDG_CACHE_HOME=/runpod-volume/.cache \
+    HF_HUB_ENABLE_HF_TRANSFER=0 \
+    OCD_ROOT=/runpod-volume/one-click-dub \
+    OCD_RUNPOD_SERVERLESS=1 \
+    OCD_ENDPOINT_MODEL=quality \
+    OCD_MODEL=quality \
+    OCD_TTS_ENGINE=omnivoice \
+    OCD_TRANSLATION_ENGINE=nllb200 \
+    OCD_ENABLE_FISH_API=0 \
+    OCD_OMNIVOICE_AUTO_CLONE=1 \
+    OCD_USE_CATT_TASHKEEL=1 \
+    OCD_SAFE_TASHKEEL=1 \
+    OCD_USE_PUNCTUATION=1 \
+    OCD_TTS_PUNCT_PAUSES=1
+
 WORKDIR /app
-RUN apt-get update -y && apt-get install -y --no-install-recommends ffmpeg git curl wget unzip ca-certificates nodejs npm libsndfile1 \
+
+RUN apt-get update -y && apt-get install -y --no-install-recommends \
+      ffmpeg git curl wget unzip ca-certificates nodejs npm libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
+
 RUN curl -fsSL https://deno.land/install.sh | sh
 ENV PATH="/root/.deno/bin:${PATH}"
+
 COPY requirements_quality.txt /app/requirements_quality.txt
+
+# 1) Install the normal Quality dependencies.
+# 2) Force-install latest Transformers from source AFTER OmniVoice, because OmniVoice can leave
+#    an older transformers build that does not expose HiggsAudioV2TokenizerModel.
+# 3) Keep hf_transfer installed, but runtime disables HF_HUB_ENABLE_HF_TRANSFER to avoid crashes
+#    if RunPod env accidentally sets it to 1 without the package being visible.
 RUN python -m pip install --no-cache-dir --ignore-installed -U pip setuptools packaging wheel \
     && python -m pip install --no-cache-dir -r /app/requirements_quality.txt \
-    && (python -c "import omnivoice; print('omnivoice ok')" || python -m pip install --no-cache-dir git+https://github.com/k2-fsa/OmniVoice.git)
+    && python -m pip install --no-cache-dir -U soxr hf_transfer \
+    && python -m pip install --no-cache-dir --force-reinstall -U git+https://github.com/huggingface/transformers.git \
+    && (python -c "import omnivoice; print('omnivoice ok')" || python -m pip install --no-cache-dir git+https://github.com/k2-fsa/OmniVoice.git) \
+    && python - <<'PY'
+import transformers
+print('Transformers:', transformers.__version__)
+from transformers import HiggsAudioV2TokenizerModel
+print('HiggsAudioV2TokenizerModel import OK:', HiggsAudioV2TokenizerModel)
+PY
+
 COPY . /app
-CMD ["python", "-u", "handler.py"]
+
+# The repository historically used both names. Make the Docker image tolerant.
+RUN if [ -f /app/serverless_handler.py ] && [ ! -f /app/handler.py ]; then cp /app/serverless_handler.py /app/handler.py; fi \
+    && chmod +x /app/start_serverless.sh 2>/dev/null || true
+
+CMD ["bash", "/app/start_serverless.sh"]

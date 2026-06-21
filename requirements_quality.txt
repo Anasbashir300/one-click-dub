@@ -12,7 +12,6 @@ numpy
 soundfile
 scipy
 pydub
-transformers
 sentencepiece
 accelerate
 huggingface_hub[cli]
@@ -20,4 +19,9 @@ sacremoses
 protobuf
 catt-tashkeel
 safetensors
+soxr
+hf_transfer
 omnivoice
+# OmniVoice/HiggsAudioV2 needs a transformers build that contains HiggsAudioV2TokenizerModel.
+# This is forced again in Dockerfile after omnivoice installation so omnivoice cannot downgrade it.
+git+https://github.com/huggingface/transformers.git
