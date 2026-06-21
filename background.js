@@ -1,42 +1,63 @@
 try { if (typeof globalThis.g === "undefined") globalThis.g = globalThis; } catch {}
 var g = globalThis;
+
+// One Click Dub — RunPod Serverless ONLY.
+// ضع مفاتيحك هنا فقط، ولا تضع روابط Pod عادي.
+const OCD_BACKEND_MODE = "runpod-serverless";
+
 const LOCAL_SERVER_BASE = "https://one-click-dub-fast-server.onrender.com";
-
-
-const CUSTOM_DUB_SERVER_BASE = "https://YOUR-RUNPOD-POD-ID-8000.proxy.runpod.net";
-
-// Serverless direct mode is for PRIVATE testing only.
-// Do not publish a Chrome extension with a RunPod API key inside it.
-// Production should use your own lightweight API gateway that keeps RUNPOD_API_KEY secret.
-const OCD_BACKEND_MODE = "runpod-serverless"
-const RUNPOD_SERVERLESS_ENDPOINT_ID = "jtk3716mehm2h7";
-const RUNPOD_API_KEY = "rpa_ZCEDLJNR3I075P9TF21OJF81JSZN3C986MQ7TZ4F2m92d4";
-
-// Each One Click Dub model can route to its own RunPod Serverless Endpoint.
-// Keep the current endpoint as the default Quality/OmniVoice endpoint, then replace
-// PUT_FAST_ENDPOINT_ID_HERE and PUT_PRO_ENDPOINT_ID_HERE with your real Endpoint IDs.
+const CUSTOM_DUB_SERVER_BASE = "";
 const DEFAULT_RUNPOD_MODEL = "quality";
+
+// IMPORTANT: for private testing only. Do not publish an extension with this key.
+const RUNPOD_API_KEY = "rpa_K1TX0CYOSF2KOVWGENP9PW1J29RMPTJ56P350X7Ifxhm77";
+
+const RUNPOD_FAST_ENDPOINT_ID = "jtk3716mehm2h7";
+const RUNPOD_QUALITY_ENDPOINT_ID = "PUT_QUALITY_ENDPOINT_ID_HERE";
+const RUNPOD_PRO_ENDPOINT_ID = "mthuo7674l6rfu";
 const RUNPOD_SERVERLESS_ENDPOINTS = {
   fast: {
     label: "Fast",
-    endpointId: "PUT_FAST_ENDPOINT_ID_HERE",
+    endpointId: RUNPOD_FAST_ENDPOINT_ID,
     apiKey: RUNPOD_API_KEY,
     policy: { executionTimeout: 600000, ttl: 3600000 }
   },
+
   quality: {
     label: "Quality / OmniVoice",
-    endpointId: RUNPOD_SERVERLESS_ENDPOINT_ID,
+    endpointId: RUNPOD_QUALITY_ENDPOINT_ID,
     apiKey: RUNPOD_API_KEY,
     policy: { executionTimeout: 900000, ttl: 3600000 }
   },
+
   pro: {
-    label: "Pro",
-    endpointId: "PUT_PRO_ENDPOINT_ID_HERE",
+    label: "Pro / Fish Speech",
+    endpointId: RUNPOD_PRO_ENDPOINT_ID,
     apiKey: RUNPOD_API_KEY,
     policy: { executionTimeout: 1200000, ttl: 3600000 }
   }
 };
+function ocdBgLog(...args) {
+  try { console.log("[OCD BG]", ...args); } catch {}
+}
+
+function ocdBgError(...args) {
+  try { console.error("[OCD BG]", ...args); } catch {}
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  ocdBgLog("message", message?.type, "from", sender?.tab?.url || sender?.url || "extension");
+
+  if (message?.type === "OCD_RUNPOD_DIAG") {
+    try {
+      const modelKey = normalizeOcdModelKey(message.payload || {});
+      const { key, config } = getRunpodEndpointConfig(modelKey);
+      sendResponse({ ok: true, model: key, endpointId: config.endpointId, hasApiKey: !!config.apiKey && !config.apiKey.includes("PUT_") });
+    } catch (error) {
+      sendResponse({ ok: false, error: error?.message || String(error) });
+    }
+    return true;
+  }
 
   if (message?.type === "OCD_GET_YOUTUBE_COOKIES") {
     getYoutubeCookieString()
@@ -301,13 +322,38 @@ function normalizeOcdVoiceNameForModel(payload, modelKey) {
   return allowed.has(value) ? value : "auto-clone-video";
 }
 
+
+async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 20000, label = "fetch") {
+  const controller = new AbortController();
+  const started = Date.now();
+  const timer = setTimeout(() => controller.abort(new Error(`${label} timed out after ${timeoutMs / 1000}s`)), timeoutMs);
+  try {
+    ocdBgLog(label, "→", url.replace(/Bearer\s+[^\s]+/g, "Bearer <redacted>"));
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    const text = await res.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+    ocdBgLog(label, "←", res.status, `${Date.now() - started}ms`, data?.id || data?.status || data?.error || data?.message || "");
+    return { res, data, text };
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`${label} timed out after ${timeoutMs / 1000}s. The request did not return from RunPod. Check network, API key, endpoint id, and extension host permission.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function startRunpodServerlessJob(payload) {
   const modelKey = normalizeOcdModelKey(payload || {});
   const { key, config } = getRunpodEndpointConfig(modelKey);
   const normalizedVoiceName = normalizeOcdVoiceNameForModel(payload || {}, key);
 
   // Serverless handler returns base64 MP3. Browser cookies are stripped server-side unless explicitly enabled.
-  const res = await fetch(`https://api.runpod.ai/v2/${config.endpointId}/run`, {
+  const runUrl = `https://api.runpod.ai/v2/${config.endpointId}/run`;
+  ocdBgLog("Starting RunPod /run", { model: key, endpointId: config.endpointId, voiceName: normalizedVoiceName });
+  const { res, data } = await fetchJsonWithTimeout(runUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -323,11 +369,8 @@ async function startRunpodServerlessJob(payload) {
       },
       policy: config.policy || { executionTimeout: 900000, ttl: 3600000 }
     })
-  });
-  const text = await res.text();
-  let data = {};
-  try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
-  if (!res.ok) throw new Error(data?.error || data?.message || `RunPod /run failed for ${key}: HTTP ${res.status}`);
+  }, 20000, `RunPod /run ${key}`);
+  if (!res.ok) throw new Error(data?.error || data?.message || data?.raw || `RunPod /run failed for ${key}: HTTP ${res.status}`);
   const runpodJobId = data.id || data.jobId;
   if (!runpodJobId) throw new Error(`RunPod did not return a job id for ${key}`);
 
@@ -365,12 +408,9 @@ async function getRunpodServerlessStatus(jobId) {
   assertRunpodServerlessConfig({ ...config, endpointId }, key);
 
   const statusUrl = `https://api.runpod.ai/v2/${endpointId}/status/${encodeURIComponent(cleanId)}`;
-  const res = await fetch(statusUrl, {
+  const { res, data } = await fetchJsonWithTimeout(statusUrl, {
     headers: { "Authorization": `Bearer ${config.apiKey}` }
-  });
-  const text = await res.text();
-  let data = {};
-  try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+  }, 20000, `RunPod /status ${key}`);
   if (!res.ok) {
     const details = data?.error || data?.message || data?.raw || "";
     if (res.status === 404) {

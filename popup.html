@@ -1,110 +1,183 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="en" dir="ltr">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>One Click Dub</title>
-  <link rel="stylesheet" href="popup.css">
-  <style>
-    .ocd-field { display: grid; gap: 7px; margin-bottom: 12px; }
-    .ocd-field span { font-size: 13px; font-weight: 800; color: #ddd8e8; }
-    .ocd-native-select {
-      width: 100%; min-height: 44px; border-radius: 10px; padding: 0 12px;
-      color: #f6f3fb; background: rgba(11, 13, 20, .78);
-      border: 1px solid rgba(255,255,255,.16); outline: none; font-weight: 750;
-    }
-    .ocd-native-select option { color: #111827; background: #fff; }
-    .ocd-voice-actions { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: -2px; }
-    .ocd-preview-btn {
-      width: 100%; border: 0; border-radius: 10px; padding: 10px 12px;
-      cursor: pointer; font-weight: 850; color: #fff;
-      background: linear-gradient(90deg, #343a54, #6029a8);
-    }
-    .ocd-help { margin: 6px 0 0; font-size: 12px; color: #aaa2b8; line-height: 1.55; }
-  </style>
+  <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
-  <section class="extension-panel" aria-label="لوحة إضافة One Click Dub">
-    <button class="panel-close" aria-label="إغلاق">×</button>
-    <div class="brand-row" dir="ltr">
-      <span class="big-logo"></span>
-      <h1>ONE CLICK <span>DUB</span></h1>
-    </div>
+  <main class="ocd-shell" aria-label="One Click Dub settings">
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+    <div class="grid-glow"></div>
 
-    <form class="settings">
-      <label class="ocd-field">
-        <span>لغة المصدر</span>
-        <select id="sourceLanguage" class="ocd-native-select" name="sourceLanguage">
-          <option value="auto">اكتشاف تلقائي</option>
-          <option value="en">English</option>
-          <option value="ar">العربية</option>
-          <option value="fr">Français</option>
-          <option value="es">Español</option>
-          <option value="de">Deutsch</option>
-          <option value="it">Italiano</option>
-          <option value="pt">Português</option>
-          <option value="tr">Türkçe</option>
-          <option value="hi">हिन्दी</option>
-          <option value="ja">日本語</option>
-          <option value="ko">한국어</option>
-          <option value="zh">中文</option>
-        </select>
-      </label>
-
-      <label class="ocd-field">
-        <span>لغة الدبلجة</span>
-        <select id="targetLanguage" class="ocd-native-select" name="targetLanguage">
-          <option value="ar">العربية</option>
-          <option value="en">English</option>
-          <option value="fr">Français</option>
-          <option value="es">Español</option>
-          <option value="de">Deutsch</option>
-          <option value="it">Italiano</option>
-          <option value="pt">Português</option>
-          <option value="tr">Türkçe</option>
-          <option value="hi">हिन्दी</option>
-          <option value="ja">日本語</option>
-          <option value="ko">한국어</option>
-          <option value="zh">中文</option>
-        </select>
-      </label>
-
-      <label class="ocd-field">
-        <span>النموذج</span>
-        <select id="modelName" class="ocd-native-select" name="modelName" dir="ltr">
-          <option value="fast">Fast — Edge TTS</option>
-          <option value="quality">Quality — OmniVoice</option>
-          <option value="pro">Pro — Fish Speech</option>
-        </select>
-      </label>
-
-      <label class="ocd-field">
-        <span>الصوت</span>
-        <select id="voiceName" class="ocd-native-select" name="voiceName"></select>
-      </label>
-
-      <div class="ocd-voice-actions">
-        <button type="button" id="ocdVoicePreviewButton" class="ocd-preview-btn">▶ عينة الصوت</button>
-        <p id="ocdVoiceHelp" class="ocd-help">Fast يعرض صوت ذكر وصوت أنثى لكل لغة. Quality وPro: استنساخ صوت الفيديو أو 4 أصوات جاهزة.</p>
+    <header class="hero-card">
+      <div class="hero-top">
+        <div class="brand-mark" aria-hidden="true">
+          <span class="pulse-orb"></span>
+          <span class="wave wave-1"></span>
+          <span class="wave wave-2"></span>
+          <span class="wave wave-3"></span>
+        </div>
+        <div class="brand-copy">
+          <div class="eyebrow"><span></span> AI Powered Dubbing</div>
+          <h1>One Click <strong>Dub</strong></h1>
+          <p>Instant cinematic AI dubbing for any video.</p>
+        </div>
+        <button id="closePopup" class="icon-btn" type="button" aria-label="Close">×</button>
       </div>
 
-      <div class="volume-row">
-        <span>رفع الصوت</span>
-        <div class="slider-line" dir="ltr"><i>☊</i><b></b></div>
-        <output>80%</output>
+      <div class="status-strip">
+        <div class="status-pill connected"><i></i><span id="connectionStatus">Ready</span></div>
+        <div class="auto-save"><span>Auto-save</span><b id="saveStatus">Synced</b></div>
+      </div>
+    </header>
+
+    <section class="panel-section languages-section">
+      <div class="section-title">
+        <div>
+          <span class="section-kicker">Languages</span>
+          <h2>Select languages</h2>
+        </div>
+        <button id="swapLanguages" class="swap-btn" type="button" title="Swap languages" aria-label="Swap languages">⇄</button>
       </div>
 
-      <div class="toggle-row">
-        <span>عرض الكابشن</span>
-        <button type="button" class="toggle on" aria-label="عرض الكابشن"><span></span></button>
+      <div class="language-grid">
+        <div class="smart-field" data-select="sourceLanguage">
+          <label>Source language</label>
+          <button class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+            <span class="flag-dot">◌</span>
+            <span class="select-value">Auto Detect</span>
+            <span class="chevron">⌄</span>
+          </button>
+          <div class="select-popover" role="listbox">
+            <input class="select-search" type="search" placeholder="Search language..." />
+            <div class="option-list"></div>
+          </div>
+        </div>
+
+        <div class="smart-field" data-select="targetLanguage">
+          <label>Dub language</label>
+          <button class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+            <span class="flag-dot">◆</span>
+            <span class="select-value">English</span>
+            <span class="chevron">⌄</span>
+          </button>
+          <div class="select-popover" role="listbox">
+            <input class="select-search" type="search" placeholder="Search language..." />
+            <div class="option-list"></div>
+          </div>
+        </div>
       </div>
 
-      <button type="button" class="primary-cta">حفظ الإعدادات <i>›</i></button>
-      <button type="button" class="ai-cta"><span>[Ai]</span> تلخيص الفيديو بالذكاء الاصطناعي <i>›</i></button>
-    </form>
+      <input id="sourceLanguage" type="hidden" value="auto" />
+      <input id="targetLanguage" type="hidden" value="en" />
+    </section>
 
-    <p class="trust-line">آمن • خاص • يعمل بالكامل في متصفحك <span>♢</span></p>
-  </section>
+    <section class="panel-section model-section">
+      <div class="section-title compact">
+        <div>
+          <span class="section-kicker">Model</span>
+          <h2>Choose dubbing power</h2>
+        </div>
+      </div>
+
+      <input id="modelName" type="hidden" value="fast" />
+      <div class="model-grid" id="modelCards" role="radiogroup" aria-label="Choose model">
+        <button type="button" class="model-card" data-model="fast" role="radio" aria-checked="false">
+          <span class="model-badge">Fastest</span>
+          <span class="model-icon">⚡</span>
+          <strong>Fast</strong>
+          <small>Edge TTS · Fast and low cost</small>
+        </button>
+        <button type="button" class="model-card" data-model="quality" role="radio" aria-checked="false">
+          <span class="model-badge balance">Best Balance</span>
+          <span class="model-icon">◇</span>
+          <strong>Quality</strong>
+          <small>OmniVoice · Natural cloning</small>
+        </button>
+        <button type="button" class="model-card" data-model="pro" role="radio" aria-checked="false">
+          <span class="model-badge premium">Premium</span>
+          <span class="model-icon">✦</span>
+          <strong>Pro</strong>
+          <small>Fish Speech · Highest tier</small>
+        </button>
+      </div>
+    </section>
+
+    <section class="panel-section voice-section">
+      <div class="section-title compact">
+        <div>
+          <span class="section-kicker">Voice</span>
+          <h2>Choose voice</h2>
+        </div>
+        <span id="voiceModeTag" class="mini-tag">Edge TTS</span>
+      </div>
+
+      <input id="voiceName" type="hidden" value="en-US-RogerNeural" />
+      <div id="voiceCards" class="voice-grid" role="radiogroup" aria-label="Choose voice"></div>
+      <p id="voiceHelp" class="voice-help">Fast shows one male and one female voice for the selected dub language.</p>
+    </section>
+
+    <section class="panel-section settings-section">
+      <div class="toggle-line">
+        <div>
+          <span class="section-kicker">Captions</span>
+          <strong>Smart captions</strong>
+          <small>CapCut / Karaoke / TikTok styles</small>
+        </div>
+        <button id="captionsToggle" class="switch" type="button" aria-pressed="true"><span></span></button>
+      </div>
+
+      <div id="captionPanel" class="caption-panel">
+        <div class="setting-row">
+          <label>Caption style</label>
+          <select id="captionStyle">
+            <option value="tiktok">TikTok Pop</option>
+            <option value="capcut">CapCut Clean</option>
+            <option value="karaoke">Karaoke Highlight</option>
+            <option value="box">Dark Box</option>
+            <option value="neon">Neon Glow</option>
+            <option value="minimal">Minimal</option>
+          </select>
+        </div>
+        <div class="setting-row two">
+          <label>Font size</label>
+          <select id="captionSize">
+            <option value="small">Small</option>
+            <option value="medium">Medium</option>
+            <option value="large">Large</option>
+          </select>
+        </div>
+        <div id="captionPreview" class="caption-preview"><span>Every video</span> becomes understandable</div>
+      </div>
+    </section>
+
+    <section class="panel-section volume-section">
+      <div class="section-title compact">
+        <div>
+          <span class="section-kicker">Original Audio</span>
+          <h2>Video volume</h2>
+        </div>
+      </div>
+      <div class="segmented" id="volumeModes" role="radiogroup" aria-label="Original video volume">
+        <button type="button" data-volume="mute">Mute</button>
+        <button type="button" data-volume="low">Low</button>
+        <button type="button" data-volume="normal">Normal</button>
+      </div>
+    </section>
+
+    <footer class="action-zone">
+      <button id="startDubbing" class="dub-cta" type="button">
+        <span class="cta-glow"></span>
+        <span class="cta-label">Start Dubbing</span>
+        <span class="cta-icon">↗</span>
+      </button>
+      <div id="feedback" class="feedback">Ready to dub · settings are saved automatically</div>
+    </footer>
+  </main>
+
   <script src="popup.js"></script>
 </body>
 </html>

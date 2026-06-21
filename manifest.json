@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "One Click Dub - Fast Local Server",
-  "description": "RunPod RTX backend for public video dubbing: Fast Edge TTS, Quality OmniVoice Auto Clone, Pro preview.",
+  "description": "Premium AI video dubbing: Fast Edge TTS, Quality OmniVoice, Pro Fish Speech.",
   "version": "1.9.0",
   "action": {
     "default_title": "One Click Dub",
@@ -34,7 +34,8 @@
     "https://*.trycloudflare.com/*",
     "https://*.loca.lt/*",
     "https://*.proxy.runpod.net/*",
-    "https://*.runpod.net/*"
+    "https://*.runpod.net/*",
+    "https://api.runpod.ai/*"
   ],
   "content_scripts": [
     {
@@ -72,7 +73,9 @@
         "ocd-page-capture.js",
         "sidebar.css",
         "custom-dub-bridge.js",
-        "voice-samples/*"
+        "voice-samples/*",
+        "voice_samples/ready/*",
+        "voice_samples/*"
       ],
       "matches": [
         "<all_urls>"

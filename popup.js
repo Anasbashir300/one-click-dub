@@ -1,69 +1,96 @@
-/* One Click Dub popup.js — integrated voice options update
- * Fast: two voices per language (male/female) + preview.
- * Quality/Pro: auto clone video voice OR four ready reference voices + preview.
+/* One Click Dub premium popup UI
+ * Chrome extension popup only. No frameworks. Keeps existing storage keys:
+ * sourceLanguage, targetLanguage, dubbingLanguage, modelName, voiceName,
+ * originalVolumeMode, captions, captionStyle, captionSize.
  */
 
-const OCD_EDGE_VOICES_BY_LANG = {
+const LANGUAGES = [
+  { code: 'auto', name: 'Auto Detect', native: 'Automatic' },
+  { code: 'ar', name: 'Arabic', native: 'العربية' },
+  { code: 'en', name: 'English', native: 'English' },
+  { code: 'fr', name: 'Français', native: 'French' },
+  { code: 'es', name: 'Español', native: 'Spanish' },
+  { code: 'de', name: 'Deutsch', native: 'German' },
+  { code: 'it', name: 'Italiano', native: 'Italian' },
+  { code: 'pt', name: 'Português', native: 'Portuguese' },
+  { code: 'tr', name: 'Türkçe', native: 'Turkish' },
+  { code: 'hi', name: 'हिन्दी', native: 'Hindi' },
+  { code: 'ja', name: '日本語', native: 'Japanese' },
+  { code: 'ko', name: '한국어', native: 'Korean' },
+  { code: 'zh', name: '中文', native: 'Chinese' },
+  { code: 'ru', name: 'Русский', native: 'Russian' },
+  { code: 'ur', name: 'اردو', native: 'Urdu' },
+  { code: 'fa', name: 'فارسی', native: 'Persian' },
+  { code: 'id', name: 'Indonesia', native: 'Indonesian' },
+  { code: 'ms', name: 'Melayu', native: 'Malay' },
+  { code: 'vi', name: 'Tiếng Việt', native: 'Vietnamese' },
+  { code: 'th', name: 'ไทย', native: 'Thai' },
+  { code: 'nl', name: 'Nederlands', native: 'Dutch' },
+  { code: 'pl', name: 'Polski', native: 'Polish' },
+  { code: 'uk', name: 'Українська', native: 'Ukrainian' },
+];
+
+const FAST_EDGE_VOICES = {
   ar: [
-    { id: 'ar-SA-HamedNeural', label: 'ذكر — Hamed' },
-    { id: 'ar-SA-ZariyahNeural', label: 'أنثى — Zariyah' },
+    { id: 'ar-SA-HamedNeural', title: 'Hamed', meta: 'Male · Arabic Saudi', icon: '♂' },
+    { id: 'ar-SA-ZariyahNeural', title: 'Zariyah', meta: 'Female · Arabic Saudi', icon: '♀' },
   ],
   en: [
-    { id: 'en-US-RogerNeural', label: 'Male — Roger' },
-    { id: 'en-US-JennyNeural', label: 'Female — Jenny' },
+    { id: 'en-US-RogerNeural', title: 'Roger', meta: 'Male · English US', icon: '♂' },
+    { id: 'en-US-JennyNeural', title: 'Jenny', meta: 'Female · English US', icon: '♀' },
   ],
   fr: [
-    { id: 'fr-FR-HenriNeural', label: 'Homme — Henri' },
-    { id: 'fr-FR-DeniseNeural', label: 'Femme — Denise' },
+    { id: 'fr-FR-HenriNeural', title: 'Henri', meta: 'Homme · Français', icon: '♂' },
+    { id: 'fr-FR-DeniseNeural', title: 'Denise', meta: 'Femme · Français', icon: '♀' },
   ],
   es: [
-    { id: 'es-ES-AlvaroNeural', label: 'Hombre — Alvaro' },
-    { id: 'es-ES-ElviraNeural', label: 'Mujer — Elvira' },
+    { id: 'es-ES-AlvaroNeural', title: 'Alvaro', meta: 'Hombre · Español', icon: '♂' },
+    { id: 'es-ES-ElviraNeural', title: 'Elvira', meta: 'Mujer · Español', icon: '♀' },
   ],
   de: [
-    { id: 'de-DE-ConradNeural', label: 'Männlich — Conrad' },
-    { id: 'de-DE-KatjaNeural', label: 'Weiblich — Katja' },
+    { id: 'de-DE-ConradNeural', title: 'Conrad', meta: 'Männlich · Deutsch', icon: '♂' },
+    { id: 'de-DE-KatjaNeural', title: 'Katja', meta: 'Weiblich · Deutsch', icon: '♀' },
   ],
   it: [
-    { id: 'it-IT-DiegoNeural', label: 'Uomo — Diego' },
-    { id: 'it-IT-ElsaNeural', label: 'Donna — Elsa' },
+    { id: 'it-IT-DiegoNeural', title: 'Diego', meta: 'Uomo · Italiano', icon: '♂' },
+    { id: 'it-IT-ElsaNeural', title: 'Elsa', meta: 'Donna · Italiano', icon: '♀' },
   ],
   pt: [
-    { id: 'pt-BR-AntonioNeural', label: 'Masculino — Antonio' },
-    { id: 'pt-BR-FranciscaNeural', label: 'Feminino — Francisca' },
-  ],
-  ru: [
-    { id: 'ru-RU-DmitryNeural', label: 'Мужской — Dmitry' },
-    { id: 'ru-RU-SvetlanaNeural', label: 'Женский — Svetlana' },
+    { id: 'pt-BR-AntonioNeural', title: 'Antonio', meta: 'Masculino · Português', icon: '♂' },
+    { id: 'pt-BR-FranciscaNeural', title: 'Francisca', meta: 'Feminino · Português', icon: '♀' },
   ],
   tr: [
-    { id: 'tr-TR-AhmetNeural', label: 'Erkek — Ahmet' },
-    { id: 'tr-TR-EmelNeural', label: 'Kadın — Emel' },
+    { id: 'tr-TR-AhmetNeural', title: 'Ahmet', meta: 'Erkek · Türkçe', icon: '♂' },
+    { id: 'tr-TR-EmelNeural', title: 'Emel', meta: 'Kadın · Türkçe', icon: '♀' },
   ],
   hi: [
-    { id: 'hi-IN-MadhurNeural', label: 'पुरुष — Madhur' },
-    { id: 'hi-IN-SwaraNeural', label: 'महिला — Swara' },
+    { id: 'hi-IN-MadhurNeural', title: 'Madhur', meta: 'पुरुष · हिन्दी', icon: '♂' },
+    { id: 'hi-IN-SwaraNeural', title: 'Swara', meta: 'महिला · हिन्दी', icon: '♀' },
   ],
   ja: [
-    { id: 'ja-JP-KeitaNeural', label: '男性 — Keita' },
-    { id: 'ja-JP-NanamiNeural', label: '女性 — Nanami' },
+    { id: 'ja-JP-KeitaNeural', title: 'Keita', meta: '男性 · 日本語', icon: '♂' },
+    { id: 'ja-JP-NanamiNeural', title: 'Nanami', meta: '女性 · 日本語', icon: '♀' },
   ],
   ko: [
-    { id: 'ko-KR-InJoonNeural', label: '남성 — InJoon' },
-    { id: 'ko-KR-SunHiNeural', label: '여성 — SunHi' },
+    { id: 'ko-KR-InJoonNeural', title: 'InJoon', meta: '남성 · 한국어', icon: '♂' },
+    { id: 'ko-KR-SunHiNeural', title: 'SunHi', meta: '여성 · 한국어', icon: '♀' },
   ],
   zh: [
-    { id: 'zh-CN-YunxiNeural', label: '男声 — Yunxi' },
-    { id: 'zh-CN-XiaoxiaoNeural', label: '女声 — Xiaoxiao' },
+    { id: 'zh-CN-YunxiNeural', title: 'Yunxi', meta: '男声 · 中文', icon: '♂' },
+    { id: 'zh-CN-XiaoxiaoNeural', title: 'Xiaoxiao', meta: '女声 · 中文', icon: '♀' },
+  ],
+  ru: [
+    { id: 'ru-RU-DmitryNeural', title: 'Dmitry', meta: 'Мужской · Русский', icon: '♂' },
+    { id: 'ru-RU-SvetlanaNeural', title: 'Svetlana', meta: 'Женский · Русский', icon: '♀' },
   ],
 };
 
-const OCD_READY_SAMPLE_VOICES = [
-  { id: 'auto-clone-video', label: 'استنساخ صوت الفيديو' },
-  { id: 'ocd-orion-male', label: 'أوريون — صوت رجالي عميق', sample: 'voice_samples/ready/ocd-orion-male.mp3' },
-  { id: 'ocd-salem-male', label: 'سالم — صوت رجالي دافئ', sample: 'voice_samples/ready/ocd-salem-male.mp3' },
-  { id: 'ocd-lina-female', label: 'لينا — صوت نسائي ناعم', sample: 'voice_samples/ready/ocd-lina-female.mp3' },
-  { id: 'ocd-noura-female', label: 'نورا — صوت نسائي واضح', sample: 'voice_samples/ready/ocd-noura-female.mp3' },
+const READY_REFERENCE_VOICES = [
+  { id: 'auto-clone-video', title: 'Clone Video Voice', meta: 'Clone the speaker voice from the current video', icon: '◎', noSample: true },
+  { id: 'ocd-orion-male', title: 'Orion', meta: 'Deep Male · cinematic and strong', icon: '◈', sample: 'voice_samples/ready/ocd_orion_male.wav' },
+  { id: 'ocd-salem-male', title: 'Salem', meta: 'Warm Male · calm and friendly', icon: '◉', sample: 'voice_samples/ready/ocd_salem_male.wav' },
+  { id: 'ocd-lina-female', title: 'Lina', meta: 'Soft Female · smooth and elegant', icon: '✧', sample: 'voice_samples/ready/ocd_lina_female.wav' },
+  { id: 'ocd-noura-female', title: 'Noura', meta: 'Clear Female · crisp and direct', icon: '✦', sample: 'voice_samples/ready/ocd_noura_female.wav' },
 ];
 
 const SAMPLE_TEXTS = {
@@ -79,188 +106,497 @@ const SAMPLE_TEXTS = {
   ja: 'こんにちは、これは短い音声サンプルです。',
   ko: '안녕하세요, 짧은 음성 샘플입니다.',
   zh: '你好，这是一个简短的语音示例。',
+  ru: 'Здравствуйте, это короткий образец голоса.',
 };
 
-function ocdShortLang(value) {
-  const raw = String(value || 'ar').trim().toLowerCase().replace('_', '-');
+const DEFAULTS = {
+  sourceLanguage: 'auto',
+  targetLanguage: 'en',
+  dubbingLanguage: 'en',
+  modelName: 'fast',
+  voiceName: 'en-US-RogerNeural',
+  originalVolumeMode: 'low',
+  captions: true,
+  captionStyle: 'tiktok',
+  captionSize: 'large',
+  captionColor: 'yellow',
+  captionAnimation: 'pop',
+  quickButtons: true,
+};
+
+let state = { ...DEFAULTS };
+let currentAudio = null;
+let saveTimer = null;
+
+const $ = (selector, root = document) => root.querySelector(selector);
+const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+
+function shortLang(value, fallback = 'ar') {
+  const raw = String(value || fallback).trim().toLowerCase().replace('_', '-');
+  if (!raw || raw === 'auto') return 'auto';
   if (raw.startsWith('zh')) return 'zh';
-  return raw.split('-')[0] || 'ar';
+  return raw.split('-')[0] || fallback;
 }
 
-function ocdNormalizeModel(value) {
-  const model = String(value || 'fast').trim().toLowerCase();
-  if (model.includes('pro') || model.includes('fish')) return 'pro';
-  if (model.includes('quality') || model.includes('omni')) return 'quality';
+function normalizeModel(value) {
+  const raw = String(value || 'fast').trim().toLowerCase();
+  if (raw.includes('pro') || raw.includes('fish')) return 'pro';
+  if (raw.includes('quality') || raw.includes('omni') || raw.includes('thinker')) return 'quality';
   return 'fast';
 }
 
-function byId(id) {
-  return document.getElementById(id);
+function languageByCode(code) {
+  return LANGUAGES.find(item => item.code === code) || LANGUAGES.find(item => item.code === 'ar');
 }
 
-function ocdGetState() {
-  return {
-    sourceLanguage: byId('sourceLanguage')?.value || 'auto',
-    targetLanguage: byId('targetLanguage')?.value || 'ar',
-    dubbingLanguage: byId('targetLanguage')?.value || 'ar',
-    modelName: ocdNormalizeModel(byId('modelName')?.value || 'fast'),
-    voiceName: byId('voiceName')?.value || 'ar-SA-HamedNeural',
-  };
+function isFastVoice(value) {
+  return /Neural$/i.test(String(value || ''));
 }
 
-function ocdVoiceOptionsFor(model, targetLang) {
+function voicesForState() {
+  const model = normalizeModel(state.modelName);
   if (model === 'fast') {
-    return OCD_EDGE_VOICES_BY_LANG[targetLang] || OCD_EDGE_VOICES_BY_LANG.en;
+    const lang = shortLang(state.targetLanguage, 'ar');
+    return FAST_EDGE_VOICES[lang] || FAST_EDGE_VOICES.en;
   }
-  return OCD_READY_SAMPLE_VOICES;
+  return READY_REFERENCE_VOICES;
 }
 
-function ocdRenderVoiceOptions(preferredVoice = '') {
-  const voiceSelect = byId('voiceName');
-  if (!voiceSelect) return;
+function validVoiceForCurrentModel(voiceName) {
+  return voicesForState().some(v => v.id === voiceName);
+}
 
-  const model = ocdNormalizeModel(byId('modelName')?.value || 'fast');
-  const targetLang = ocdShortLang(byId('targetLanguage')?.value || 'ar');
-  const previous = preferredVoice || voiceSelect.value;
-  const options = ocdVoiceOptionsFor(model, targetLang);
+function ensureValidVoice() {
+  if (!validVoiceForCurrentModel(state.voiceName)) {
+    const voices = voicesForState();
+    state.voiceName = voices[0]?.id || 'ar-SA-HamedNeural';
+  }
+  const voiceInput = $('#voiceName');
+  if (voiceInput) voiceInput.value = state.voiceName;
+}
 
-  voiceSelect.innerHTML = '';
-  for (const opt of options) {
-    const option = document.createElement('option');
-    option.value = opt.id;
-    option.textContent = opt.label;
-    if (opt.sample) option.dataset.sample = opt.sample;
-    voiceSelect.appendChild(option);
+async function readSettings() {
+  try {
+    const saved = await chrome.storage.sync.get(DEFAULTS);
+    state = {
+      ...DEFAULTS,
+      ...saved,
+      targetLanguage: saved.targetLanguage || saved.dubbingLanguage || DEFAULTS.targetLanguage,
+      dubbingLanguage: saved.dubbingLanguage || saved.targetLanguage || DEFAULTS.dubbingLanguage,
+      modelName: normalizeModel(saved.modelName || DEFAULTS.modelName),
+    };
+  } catch (error) {
+    console.warn('[OCD] storage read failed', error);
+    state = { ...DEFAULTS };
+  }
+}
+
+function setFeedback(message, type = '') {
+  const el = $('#feedback');
+  if (!el) return;
+  el.textContent = message;
+  el.classList.remove('error', 'success');
+  if (type) el.classList.add(type);
+}
+
+function setSaveStatus(text = 'Synced') {
+  const el = $('#saveStatus');
+  if (el) el.textContent = text;
+}
+
+async function notifyActiveTab() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) {
+      await chrome.tabs.sendMessage(tab.id, { type: 'OCD_SETTINGS_CHANGED', payload: state });
+    }
+  } catch {
+    // The current tab may not have the content script. Settings are still saved.
+  }
+}
+
+async function saveSettings({ notify = true } = {}) {
+  ensureValidVoice();
+  const payload = {
+    ...state,
+    modelName: normalizeModel(state.modelName),
+    targetLanguage: state.targetLanguage,
+    dubbingLanguage: state.targetLanguage,
+    voiceName: state.voiceName,
+  };
+  state = { ...payload };
+  setSaveStatus('Saving...');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    try {
+      await chrome.storage.sync.set(payload);
+      setSaveStatus('Synced');
+      if (notify) await notifyActiveTab();
+    } catch (error) {
+      console.warn('[OCD] storage save failed', error);
+      setSaveStatus('Offline');
+    }
+  }, 120);
+}
+
+function updateHiddenInputs() {
+  $('#sourceLanguage').value = state.sourceLanguage;
+  $('#targetLanguage').value = state.targetLanguage;
+  $('#modelName').value = normalizeModel(state.modelName);
+  $('#voiceName').value = state.voiceName;
+}
+
+function renderLanguageSelect(name) {
+  const root = document.querySelector(`[data-select="${name}"]`);
+  if (!root) return;
+  const trigger = $('.select-trigger', root);
+  const valueEl = $('.select-value', root);
+  const list = $('.option-list', root);
+  const search = $('.select-search', root);
+
+  function draw(filter = '') {
+    const query = filter.trim().toLowerCase();
+    const items = LANGUAGES.filter(lang => {
+      if (name === 'targetLanguage' && lang.code === 'auto') return false;
+      const hay = `${lang.code} ${lang.name} ${lang.native}`.toLowerCase();
+      return !query || hay.includes(query);
+    });
+    list.innerHTML = '';
+    for (const lang of items) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `lang-option ${state[name] === lang.code ? 'selected' : ''}`;
+      btn.dataset.value = lang.code;
+      btn.innerHTML = `<strong>${lang.name}</strong><small>${lang.native}</small>`;
+      btn.addEventListener('click', () => {
+        state[name] = lang.code;
+        if (name === 'targetLanguage') state.dubbingLanguage = lang.code;
+        root.classList.remove('open');
+        root.closest('.languages-section')?.classList.remove('dropdown-open');
+        trigger.setAttribute('aria-expanded', 'false');
+        search.value = '';
+        ensureValidVoice();
+        renderAll();
+        saveSettings();
+      });
+      list.appendChild(btn);
+    }
   }
 
-  if ([...voiceSelect.options].some(o => o.value === previous)) {
-    voiceSelect.value = previous;
-  } else {
-    voiceSelect.value = options[0]?.id || '';
-  }
+  const selected = languageByCode(state[name]);
+  valueEl.textContent = selected?.name || state[name];
+  draw(search.value || '');
 
-  const help = byId('ocdVoiceHelp');
+  if (!root.dataset.bound) {
+    root.dataset.bound = '1';
+    trigger.addEventListener('click', () => {
+      $$('.smart-field.open').forEach(el => {
+        if (el !== root) {
+          el.classList.remove('open');
+          $('.select-trigger', el)?.setAttribute('aria-expanded', 'false');
+        }
+      });
+      $$('.languages-section.dropdown-open').forEach(el => { if (!el.contains(root)) el.classList.remove('dropdown-open'); });
+      const open = !root.classList.contains('open');
+      root.classList.toggle('open', open);
+      const section = root.closest('.languages-section');
+      if (section) section.classList.toggle('dropdown-open', open);
+      trigger.setAttribute('aria-expanded', String(open));
+      if (open) setTimeout(() => search.focus(), 50);
+    });
+    search.addEventListener('input', () => draw(search.value));
+  }
+}
+
+function renderModels() {
+  $$('.model-card').forEach(card => {
+    const active = normalizeModel(card.dataset.model) === normalizeModel(state.modelName);
+    card.classList.toggle('active', active);
+    card.setAttribute('aria-checked', String(active));
+  });
+}
+
+function renderVoices() {
+  ensureValidVoice();
+  const grid = $('#voiceCards');
+  const tag = $('#voiceModeTag');
+  const help = $('#voiceHelp');
+  const model = normalizeModel(state.modelName);
+  const voices = voicesForState();
+
+  if (tag) {
+    tag.textContent = model === 'fast' ? 'Edge TTS' : model === 'quality' ? 'OmniVoice' : 'Fish Speech';
+  }
   if (help) {
     help.textContent = model === 'fast'
-      ? 'Fast يعرض صوت ذكر وصوت أنثى حسب لغة الدبلجة. المعاينة هنا من المتصفح وليست Edge TTS الحقيقي.'
-      : 'Quality وPro: اختر استنساخ صوت الفيديو أو أحد الأصوات الجاهزة الأربعة. ضع عينات MP3 داخل voice_samples/ready للمعاينة.';
+      ? 'Fast shows one male and one female voice for the selected dub language. Samples use bundled audio or browser preview.'
+      : 'Choose video voice cloning or one of the preset reference voices. Presets use WAV references on RunPod and bundled samples for preview.';
   }
 
-  ocdSaveSettings();
-}
+  grid.innerHTML = '';
+  voices.forEach(voice => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = `voice-card ${state.voiceName === voice.id ? 'active' : ''}`;
+    card.dataset.voice = voice.id;
+    card.setAttribute('role', 'radio');
+    card.setAttribute('aria-checked', String(state.voiceName === voice.id));
 
-async function ocdSaveSettings() {
-  const state = ocdGetState();
-  try {
-    await chrome.storage.sync.set(state);
-  } catch (error) {
-    console.warn('[OCD] could not save settings', error);
-  }
-  return state;
-}
+    card.innerHTML = `
+      <span class="voice-copy">
+        <span class="avatar">${voice.icon || '♪'}</span>
+        <span class="voice-text">
+          <strong>${voice.title}</strong>
+          <small>${voice.meta || ''}</small>
+        </span>
+      </span>
+      <span class="play-btn" data-play="${voice.id}" title="Play sample">${voice.noSample ? '◎' : '▶'}</span>
+    `;
 
-async function ocdLoadSettings() {
-  let saved = {};
-  try {
-    saved = await chrome.storage.sync.get({
-      sourceLanguage: 'auto',
-      targetLanguage: 'ar',
-      dubbingLanguage: 'ar',
-      modelName: 'fast',
-      voiceName: 'ar-SA-HamedNeural',
+    card.addEventListener('click', event => {
+      if (event.target.closest('.play-btn')) return;
+      state.voiceName = voice.id;
+      renderVoices();
+      saveSettings();
     });
-  } catch {}
 
-  if (byId('sourceLanguage')) byId('sourceLanguage').value = saved.sourceLanguage || 'auto';
-  if (byId('targetLanguage')) byId('targetLanguage').value = saved.targetLanguage || saved.dubbingLanguage || 'ar';
-  if (byId('modelName')) byId('modelName').value = ocdNormalizeModel(saved.modelName || 'fast');
-  ocdRenderVoiceOptions(saved.voiceName || '');
+    $('.play-btn', card).addEventListener('click', event => {
+      event.stopPropagation();
+      playVoiceSample(voice, event.currentTarget);
+    });
+
+    grid.appendChild(card);
+  });
 }
 
-async function ocdPlaySelectedVoiceSample() {
-  const state = ocdGetState();
-  const voiceSelect = byId('voiceName');
-  const selected = voiceSelect?.selectedOptions?.[0];
+function renderCaptionPanel() {
+  const toggle = $('#captionsToggle');
+  const panel = $('#captionPanel');
+  const style = $('#captionStyle');
+  const size = $('#captionSize');
+  const preview = $('#captionPreview');
+  toggle?.classList.toggle('on', !!state.captions);
+  toggle?.setAttribute('aria-pressed', String(!!state.captions));
+  panel?.classList.toggle('hidden', !state.captions);
+  if (style) style.value = state.captionStyle || 'tiktok';
+  if (size) size.value = state.captionSize || 'large';
+  if (preview) {
+    preview.className = `caption-preview ${state.captionStyle || 'tiktok'}`;
+    preview.style.fontSize = state.captionSize === 'small' ? '13px' : state.captionSize === 'medium' ? '15px' : '17px';
+  }
+}
 
-  if (state.voiceName === 'auto-clone-video') {
-    alert('هذا الخيار يستنسخ صوت الفيديو عند بدء الدبلجة، لذلك لا توجد عينة ثابتة قبل اختيار فيديو.');
+function renderVolumeModes() {
+  $$('#volumeModes [data-volume]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.volume === state.originalVolumeMode);
+  });
+}
+
+function renderAll() {
+  updateHiddenInputs();
+  renderLanguageSelect('sourceLanguage');
+  renderLanguageSelect('targetLanguage');
+  renderModels();
+  renderVoices();
+  renderCaptionPanel();
+  renderVolumeModes();
+}
+
+function stopCurrentAudio() {
+  try {
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+    }
+  } catch {}
+  currentAudio = null;
+  try { speechSynthesis.cancel(); } catch {}
+  $$('.play-btn.playing').forEach(btn => {
+    btn.classList.remove('playing');
+    btn.textContent = btn.textContent === '■' ? '▶' : btn.textContent;
+  });
+}
+
+async function playVoiceSample(voice, button) {
+  if (button.classList.contains('playing')) {
+    stopCurrentAudio();
+    return;
+  }
+  stopCurrentAudio();
+
+  if (voice.noSample) {
+    setFeedback('Video voice cloning has no fixed sample. The voice will be generated from the current video when dubbing starts.', 'success');
     return;
   }
 
-  const samplePath = selected?.dataset?.sample;
-  if (samplePath) {
+  button.classList.add('playing');
+  button.textContent = '■';
+
+  if (voice.sample) {
     try {
-      const audio = new Audio(chrome.runtime.getURL(samplePath));
-      await audio.play();
+      const url = chrome.runtime.getURL(voice.sample);
+      currentAudio = new Audio(url);
+      currentAudio.onended = stopCurrentAudio;
+      currentAudio.onerror = () => {
+        stopCurrentAudio();
+        speakFallback(voice);
+      };
+      await currentAudio.play();
       return;
     } catch (error) {
-      console.warn('[OCD] ready voice sample missing, fallback to browser speech', error);
-      alert('لم أجد ملف العينة داخل الإضافة. ضع ملف MP3 داخل voice_samples/ready بنفس الاسم، وسأشغل معاينة مؤقتة من المتصفح الآن.');
+      console.warn('[OCD] bundled sample failed, using speech fallback', error);
     }
   }
 
+  speakFallback(voice, button);
+}
+
+function speakFallback(voice, button = null) {
   try {
-    speechSynthesis.cancel();
-    const lang = ocdShortLang(state.targetLanguage);
+    const lang = shortLang(state.targetLanguage, 'en');
     const text = SAMPLE_TEXTS[lang] || SAMPLE_TEXTS.en;
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = lang === 'zh' ? 'zh-CN' : lang;
-
-    const isFemale = /female|woman|أنثى|زريّة|Zariyah|Jenny|Denise|Elvira|Katja|Elsa|Francisca|Svetlana|Emel|Swara|Nanami|SunHi|Xiaoxiao/i.test(selected?.textContent || '');
     const voices = speechSynthesis.getVoices();
-    const preferred = voices.find(v => v.lang?.toLowerCase().startsWith(lang) && (isFemale ? /female|woman|zira|susan|sara|female/i.test(v.name) : /male|man|david|mark|male/i.test(v.name)))
+    const female = /female|أنثى|woman|zariyah|jenny|denise|elvira|katja|elsa|francisca|emel|swara|nanami|sunhi|xiaoxiao|lina|noura/i.test(`${voice.id} ${voice.title} ${voice.meta}`);
+    const preferred = voices.find(v => v.lang?.toLowerCase().startsWith(lang) && (female ? /female|woman|zira|sara|susan|female/i.test(v.name) : /male|man|david|mark|male/i.test(v.name)))
       || voices.find(v => v.lang?.toLowerCase().startsWith(lang));
     if (preferred) utterance.voice = preferred;
+    utterance.onend = stopCurrentAudio;
+    utterance.onerror = stopCurrentAudio;
     speechSynthesis.speak(utterance);
+    if (button) {
+      button.classList.add('playing');
+      button.textContent = '■';
+    }
   } catch (error) {
-    console.warn('[OCD] voice preview failed', error);
+    console.warn('[OCD] speech fallback failed', error);
+    stopCurrentAudio();
+    setFeedback('Could not play this voice sample in the current browser.', 'error');
   }
 }
 
-function ocdFlashSaved() {
-  document.body.animate(
-    [
-      { filter: 'brightness(1)' },
-      { filter: 'brightness(1.18)' },
-      { filter: 'brightness(1)' },
-    ],
-    { duration: 420, easing: 'ease-out' }
-  );
-}
-
-function ocdBindPopupEvents() {
-  document.querySelector('.toggle')?.addEventListener('click', event => {
-    event.currentTarget.classList.toggle('on');
-    ocdSaveSettings();
-  });
-
-  document.querySelector('.panel-close')?.addEventListener('click', () => window.close());
-
-  byId('sourceLanguage')?.addEventListener('change', ocdSaveSettings);
-  byId('targetLanguage')?.addEventListener('change', () => ocdRenderVoiceOptions());
-  byId('modelName')?.addEventListener('change', () => ocdRenderVoiceOptions());
-  byId('voiceName')?.addEventListener('change', ocdSaveSettings);
-  byId('ocdVoicePreviewButton')?.addEventListener('click', ocdPlaySelectedVoiceSample);
-
-  document.querySelector('.primary-cta')?.addEventListener('click', async () => {
-    await ocdSaveSettings();
-    ocdFlashSaved();
-    const btn = document.querySelector('.primary-cta');
-    if (btn) {
-      const old = btn.childNodes[0]?.textContent || '';
-      btn.childNodes[0].textContent = 'تم حفظ الإعدادات ';
-      setTimeout(() => { if (btn.childNodes[0]) btn.childNodes[0].textContent = old || 'حفظ الإعدادات '; }, 1100);
+function bindEvents() {
+  document.addEventListener('click', event => {
+    if (!event.target.closest('.smart-field')) {
+      $$('.smart-field.open').forEach(el => {
+        el.classList.remove('open');
+        $('.select-trigger', el)?.setAttribute('aria-expanded', 'false');
+      });
+      $$('.languages-section.dropdown-open').forEach(el => el.classList.remove('dropdown-open'));
     }
   });
+
+  $('#closePopup')?.addEventListener('click', () => window.close());
+
+  $('#swapLanguages')?.addEventListener('click', () => {
+    if (state.sourceLanguage === 'auto') {
+      state.sourceLanguage = state.targetLanguage;
+      state.targetLanguage = 'en';
+    } else {
+      const oldSource = state.sourceLanguage;
+      state.sourceLanguage = state.targetLanguage;
+      state.targetLanguage = oldSource;
+    }
+    state.dubbingLanguage = state.targetLanguage;
+    ensureValidVoice();
+    renderAll();
+    saveSettings();
+  });
+
+  $$('.model-card').forEach(card => {
+    card.addEventListener('click', () => {
+      state.modelName = normalizeModel(card.dataset.model);
+      ensureValidVoice();
+      renderAll();
+      saveSettings();
+    });
+  });
+
+  $('#captionsToggle')?.addEventListener('click', () => {
+    state.captions = !state.captions;
+    renderCaptionPanel();
+    saveSettings();
+  });
+
+  $('#captionStyle')?.addEventListener('change', event => {
+    state.captionStyle = event.target.value;
+    renderCaptionPanel();
+    saveSettings();
+  });
+
+  $('#captionSize')?.addEventListener('change', event => {
+    state.captionSize = event.target.value;
+    renderCaptionPanel();
+    saveSettings();
+  });
+
+  $$('#volumeModes [data-volume]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.originalVolumeMode = btn.dataset.volume;
+      renderVolumeModes();
+      saveSettings();
+    });
+  });
+
+  $('#startDubbing')?.addEventListener('click', startDubbingFromPopup);
 }
 
-async function ocdInitPopup() {
-  ocdBindPopupEvents();
-  await ocdLoadSettings();
+async function startDubbingFromPopup() {
+  const btn = $('#startDubbing');
+  const oldLabel = $('.cta-label', btn)?.textContent || 'Start Dubbing';
+  try {
+    btn.disabled = true;
+    $('.cta-label', btn).textContent = 'Preparing...';
+    setFeedback('Sending settings to the video page...', '');
+    await saveSettings({ notify: false });
+    await new Promise(resolve => setTimeout(resolve, 160));
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) throw new Error('No active tab found');
+
+    await chrome.tabs.sendMessage(tab.id, { type: 'OCD_SETTINGS_CHANGED', payload: state });
+    await chrome.tabs.sendMessage(tab.id, { type: 'OCD_START_CUSTOM_DUB' });
+
+    setFeedback('Dubbing started. Watch the floating button over the video.', 'success');
+    $('.cta-label', btn).textContent = 'Dubbing Started';
+    setTimeout(() => window.close(), 700);
+  } catch (error) {
+    console.warn('[OCD] start dubbing failed', error);
+    setFeedback('Open a normal video page, then try again. ' + (error?.message || ''), 'error');
+    $('.cta-label', btn).textContent = oldLabel;
+  } finally {
+    setTimeout(() => { btn.disabled = false; }, 650);
+  }
+}
+
+async function updateVideoStatus() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return;
+    const res = await chrome.tabs.sendMessage(tab.id, { type: 'OCD_VIDEO_STATUS' });
+    if (res?.hasVideo) {
+      $('#connectionStatus').textContent = res.dubbing ? 'Dubbing' : 'Video Ready';
+      setFeedback(res.dubbing ? 'Dubbing is currently running on this page.' : 'Video detected. You can start dubbing now.', res.dubbing ? 'success' : '');
+    } else {
+      $('#connectionStatus').textContent = 'No Video';
+      setFeedback('Open YouTube or a page with an HTML5 video player.', '');
+    }
+  } catch {
+    $('#connectionStatus').textContent = 'Ready';
+  }
+}
+
+async function init() {
+  bindEvents();
+  await readSettings();
+  ensureValidVoice();
+  renderAll();
+  saveSettings({ notify: false });
+  await updateVideoStatus();
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', ocdInitPopup);
+  document.addEventListener('DOMContentLoaded', init);
 } else {
-  ocdInitPopup();
+  init();
 }

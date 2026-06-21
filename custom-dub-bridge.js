@@ -8,7 +8,7 @@
   let polling = false;
   let overlay = null;
   let floatingDock = null;
-  let dockExpanded = false;
+  let dockExpanded = true;
   let captionVisible = false;
   let captionBox = null;
   let captionTimer = null;
@@ -73,7 +73,7 @@
         <span class="ocd-pvt-dot"></span>
         <span class="ocd-pvt-label">DUB</span>
       </button>
-      <div id="ocd-pvt-actions" class="ocd-pvt-actions" aria-hidden="true">
+      <div id="ocd-pvt-actions" class="ocd-pvt-actions" aria-hidden="false">
         <button id="ocd-pvt-caption-btn" class="ocd-pvt-action" type="button" title="Show / hide captions">
           <span>CC</span>
           <small>Caption</small>
@@ -87,6 +87,7 @@
     document.documentElement.appendChild(floatingDock);
 
     floatingDock.querySelector('#ocd-pvt-btn')?.addEventListener('click', async () => {
+      // Keep Caption and Download buttons visible; DUB remains the primary start/stop control.
       dockExpanded = true;
       updateFloatingDock();
 
@@ -96,7 +97,13 @@
       }
 
       if (!polling) {
-        await startJob();
+        try {
+          show('Starting One Click Dub...', 1);
+          await startJob();
+        } catch (error) {
+          console.error('[OCD] DUB button failed:', error);
+          show('DUB failed: ' + (error?.message || String(error)), 100);
+        }
       }
     });
 
@@ -128,6 +135,7 @@
         justify-items: end;
         direction: ltr;
         pointer-events: auto;
+        overflow: visible !important;
       }
       #ocd-pvt-dock button { cursor: pointer; user-select: none; }
       #ocd-pvt-dock .ocd-pvt-main {
@@ -151,12 +159,13 @@
       #ocd-pvt-dock .ocd-pvt-main:hover { transform: translateX(-2px) scale(1.03); box-shadow: 0 20px 55px rgba(0,0,0,.52), 0 0 34px rgba(34,211,238,.26); }
       #ocd-pvt-dock .ocd-pvt-dot { width: 8px; height: 8px; border-radius: 999px; background: #22d3ee; box-shadow: 0 0 14px rgba(34,211,238,.85); }
       #ocd-pvt-dock .ocd-pvt-actions {
-        display: grid;
+        display: grid !important;
         gap: 9px;
-        opacity: 0;
-        pointer-events: none;
-        transform: translateX(12px) scale(.96);
+        opacity: 1 !important;
+        pointer-events: auto !important;
+        transform: translateX(0) scale(1) !important;
         transition: opacity .18s ease, transform .18s ease;
+        overflow: visible !important;
       }
       #ocd-pvt-dock.open .ocd-pvt-actions { opacity: 1; pointer-events: auto; transform: translateX(0) scale(1); }
       #ocd-pvt-dock .ocd-pvt-action {
@@ -247,8 +256,39 @@
     return String(s || '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
   }
 
+
+  function timeoutError(label, ms) {
+    return new Error(`${label} timed out after ${Math.round(ms / 1000)}s. Open chrome://extensions → One Click Dub → Service Worker → Inspect to see the real error.`);
+  }
+
+  function withTimeout(promise, ms, label) {
+    let timer;
+    return Promise.race([
+      promise.finally(() => clearTimeout(timer)),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(timeoutError(label, ms)), ms);
+      })
+    ]);
+  }
+
+  async function sendRuntimeMessageSafe(message, timeoutMs = 12000, label = 'Background message') {
+    if (!chrome?.runtime?.sendMessage) throw new Error('Chrome runtime messaging is unavailable on this page. Reload the page and extension.');
+    return withTimeout(chrome.runtime.sendMessage(message), timeoutMs, label);
+  }
+
+  async function getStorageSyncSafe(defaults, timeoutMs = 4000) {
+    if (!chrome?.storage?.sync?.get) return { ...defaults };
+    try {
+      return await withTimeout(chrome.storage.sync.get(defaults), timeoutMs, 'Reading extension settings');
+    } catch (error) {
+      console.warn('[OCD] settings read failed; using defaults', error);
+      return { ...defaults };
+    }
+  }
+
   async function startJob() {
     if (polling) return;
+    show('Preparing video and settings...', 1);
 
     const video = getVideo();
     if (!video) return show('Could not find a video element on this page. Open a page that contains a playable video.', 0);
@@ -259,24 +299,27 @@
     }
 
     let siteCookie = '';
+    show('Preparing video and settings... reading cookies/settings', 1.5);
     try {
-      const cookieRes = await chrome.runtime.sendMessage({ type: 'OCD_GET_SITE_COOKIES', url: location.href });
+      const cookieRes = await sendRuntimeMessageSafe({ type: 'OCD_GET_SITE_COOKIES', url: location.href }, 2500, 'Reading site cookies');
       if (cookieRes?.ok && cookieRes.cookieString) siteCookie = cookieRes.cookieString;
     } catch (error) {
-      console.warn('[OCD] could not read site cookies', error);
+      // Cookies are optional. Never let cookie reading freeze the DUB button.
+      console.warn('[OCD] could not read site cookies; continuing without cookies', error);
     }
 
-    const settings = await chrome.storage.sync.get({
+    const settings = await getStorageSyncSafe({
       dubbingLanguage: 'ar-SA',
+      targetLanguage: 'ar-SA',
       sourceLanguage: 'auto',
       voiceName: 'ar-SA-HamedNeural',
       modelName: 'fast'
     });
 
     const selectedModel = normalizeModelName(settings.modelName || 'fast');
-    const targetLanguage = normalizeLang(settings.dubbingLanguage || 'ar');
+    const targetLanguage = normalizeLang(settings.targetLanguage || settings.dubbingLanguage || 'ar');
     const selectedVoice = selectedModel === 'fast'
-      ? normalizeVoice(settings.voiceName, settings.dubbingLanguage)
+      ? normalizeVoice(settings.voiceName, settings.targetLanguage || settings.dubbingLanguage)
       : normalizeReferenceVoice(settings.voiceName);
 
     const label = selectedModel === 'pro'
@@ -285,7 +328,7 @@
         ? 'Quality / OmniVoice'
         : 'Fast / Edge TTS';
     show(`Sending page/video to custom RunPod backend · ${label}...`, 2);
-    const res = await chrome.runtime.sendMessage({
+    const res = await sendRuntimeMessageSafe({
       type: 'OCD_PVT_START_JOB',
       payload: {
         url: sourceUrl,
@@ -301,7 +344,7 @@
         translationEngine: selectedModel === 'fast' ? 'google' : 'nllb200',
         cuda: true
       }
-    });
+    }, 45000, 'Starting RunPod Serverless job');
     if (!res?.ok) return show(res?.error || 'Could not start custom dubbing job.', 100);
     pollJob(res.jobId);
   }
@@ -360,7 +403,7 @@
     updateFloatingDock();
     try {
       while (true) {
-        const res = await chrome.runtime.sendMessage({ type: 'OCD_PVT_JOB_STATUS', jobId });
+        const res = await sendRuntimeMessageSafe({ type: 'OCD_PVT_JOB_STATUS', jobId }, 30000, 'Checking RunPod job status');
         if (!res?.ok) {
           show(res?.error || 'Job status failed.', 100);
           break;
@@ -378,7 +421,7 @@
           break;
         }
         if (res.status === 'soon') {
-          show(res.message || '✨ Pro / Fish-Speech S1-mini is coming soon.', 100);
+          show('Pro request reached RunPod, but this Pro endpoint is still running the old UI-preview worker. Rebuild the Pro Serverless endpoint with Dockerfile.pro + serverless_handler.py + colab_custom_dub_server.py, then redeploy.', 100);
           break;
         }
         if (res.status === 'error') break;
@@ -629,7 +672,7 @@
     dock.classList.toggle('open', dockExpanded || polling || !!overlay || !!lastDubResult);
     dock.classList.toggle('busy', polling);
     dock.classList.toggle('ready', !!lastDubResult && !polling);
-    if (actions) actions.setAttribute('aria-hidden', dock.classList.contains('open') ? 'false' : 'true');
+    if (actions) actions.setAttribute('aria-hidden', 'false');
 
     if (main) {
       main.title = overlay ? 'Stop dubbed audio' : polling ? 'Dubbing is processing' : 'Start dubbing this video';
@@ -773,6 +816,14 @@
   }
 
   chrome.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
+    if (message?.type === 'OCD_VIDEO_STATUS') {
+      sendResponse({ hasVideo: !!getVideo(), dubbing: !!overlay || !!polling });
+      return true;
+    }
+    if (message?.type === 'OCD_SETTINGS_CHANGED') {
+      sendResponse({ ok: true });
+      return true;
+    }
     if (message?.type === 'OCD_START_CUSTOM_DUB') {
       startJob()
         .then(() => sendResponse({ ok: true }))
