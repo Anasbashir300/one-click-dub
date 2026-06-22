@@ -1,0 +1,49 @@
+# One Click Dub - RunPod Serverless RTX 3090 image
+# Build target: worker that receives /run jobs and returns final MP3 as base64.
+# Fish S2-Pro is LOCAL ONLY. No Fish API is used.
+
+ARG BASE_IMAGE=pytorch/pytorch:2.6.0-cuda12.6-cudnn9-runtime
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/runpod-volume/huggingface \
+    TRANSFORMERS_CACHE=/runpod-volume/huggingface \
+    XDG_CACHE_HOME=/runpod-volume/.cache \
+    OCD_ROOT=/runpod-volume/one-click-dub \
+    OCD_SERVERLESS_OUTPUT_BASE64=1 \
+    OCD_FISH_TTS_MODE=local-http \
+    OCD_FISH_LOCAL_URL=http://127.0.0.1:8080/v1/tts \
+    OCD_START_FISH_SERVER=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg git git-lfs curl wget ca-certificates nodejs npm build-essential \
+    libsndfile1 espeak-ng portaudio19-dev libsox-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Deno helps yt-dlp solve YouTube EJS/n-challenges.
+RUN curl -fsSL https://deno.land/install.sh | sh
+ENV PATH="/root/.deno/bin:${PATH}"
+
+WORKDIR /app
+COPY requirements_runpod_serverless.txt /app/requirements_runpod_serverless.txt
+RUN python -m pip install -U pip wheel setuptools packaging && \
+    python -m pip install -r /app/requirements_runpod_serverless.txt
+
+# Fish S2-Pro local server support. This build does NOT use Fish cloud/API.
+# The official docs expose POST /v1/tts through tools/api_server.py.
+# We install Fish Speech in editable mode and download weights at runtime to /runpod-volume
+# so the image build remains smaller and model cache persists on RunPod network volume.
+ARG FISH_SPEECH_REF=main
+ARG FISH_CUDA_EXTRA=cu126
+RUN git clone --depth=1 --branch ${FISH_SPEECH_REF} https://github.com/fishaudio/fish-speech.git /opt/fish-speech && \
+    cd /opt/fish-speech && \
+    python -m pip install -U pip wheel setuptools packaging && \
+    (python -m pip install -e ".[${FISH_CUDA_EXTRA}]" || python -m pip install -e .)
+
+COPY . /app
+RUN chmod +x /app/start_runpod_worker.sh /app/start_fish_s2_local_server.sh && \
+    python -m py_compile /app/colab_custom_dub_server.py /app/runpod_handler.py
+
+CMD ["/app/start_runpod_worker.sh"]
